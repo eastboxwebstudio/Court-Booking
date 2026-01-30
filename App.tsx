@@ -15,7 +15,8 @@ import {
   Mail,
   Phone,
   Timer,
-  Hourglass
+  Hourglass,
+  CalendarDays
 } from 'lucide-react';
 
 // Mock Data
@@ -54,17 +55,18 @@ const App: React.FC = () => {
   // Generate Slots based on date (Mock Availability)
   const generateTimeSlots = (date: Date): TimeSlot[] => {
     const slots: TimeSlot[] = [];
-    // Use date string to seed randomness for consistent mock availability per day
-    const dateStr = date.toDateString();
+    const dayOfMonth = date.getDate(); // Use day of month to vary availability
     
     for (let i = START_HOUR; i <= END_HOUR; i++) {
       const timeStr = `${i}:00`;
       const label = i > 12 ? `${i - 12} PM` : `${i} AM`;
-      // Simple hash to pseudo-randomize booked slots
-      const isBooked = (dateStr.length + i) % 5 === 0; 
+      
+      // Better pseudo-randomness based on Day + Hour
+      // This ensures different days have different patterns
+      const isBooked = ((dayOfMonth + i) % 5 === 0) || ((dayOfMonth * i) % 13 === 0); 
 
       slots.push({
-        id: `${dateStr}-${i}`,
+        id: `${date.toISOString().split('T')[0]}-${i}`,
         time: timeStr,
         label,
         hour: i,
@@ -109,13 +111,25 @@ const App: React.FC = () => {
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
+  // Helper to format Date for Input value (YYYY-MM-DD)
+  const getFormattedDateValue = (date: Date) => {
+    const offset = date.getTimezoneOffset();
+    const localDate = new Date(date.getTime() - (offset * 60 * 1000));
+    return localDate.toISOString().split('T')[0];
+  };
+
 
   // --- Handlers ---
 
-  const handleDateSelect = (offset: number) => {
-    const newDate = new Date();
-    newDate.setDate(newDate.getDate() + offset);
-    setDetails(prev => ({ ...prev, date: newDate, selectedSlots: [] })); // Reset slots on date change
+  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.value) return;
+    
+    // Create Date from YYYY-MM-DD string treating it as Local Time
+    const [year, month, day] = e.target.value.split('-').map(Number);
+    // Note: Month is 0-indexed in JS Date constructor
+    const newDate = new Date(year, month - 1, day);
+    
+    setDetails(prev => ({ ...prev, date: newDate, selectedSlots: [] }));
   };
 
   const handleDurationSelect = (hours: number) => {
@@ -194,44 +208,6 @@ const App: React.FC = () => {
     });
     setStep(BookingStep.SELECT_COURT);
     setTimeLeft(null);
-  };
-
-  // --- Renders ---
-
-  // Date Selection Scroll
-  const renderDateSelector = () => {
-    const dates = [];
-    for (let i = 0; i < 7; i++) {
-      const d = new Date();
-      d.setDate(d.getDate() + i);
-      dates.push(d);
-    }
-
-    return (
-      <div className="flex gap-3 overflow-x-auto pb-4 no-scrollbar -mx-6 px-6">
-        {dates.map((d, index) => {
-          const isSelected = d.toDateString() === details.date.toDateString();
-          const dayName = d.toLocaleDateString('ms-MY', { weekday: 'short' });
-          const dayNum = d.getDate();
-          
-          return (
-            <button
-              key={index}
-              onClick={() => handleDateSelect(index)}
-              className={`
-                flex flex-col items-center justify-center min-w-[70px] h-20 rounded-xl border transition-all
-                ${isSelected 
-                  ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg scale-105' 
-                  : 'bg-white border-gray-200 text-gray-500'}
-              `}
-            >
-              <span className="text-xs font-medium uppercase">{dayName}</span>
-              <span className="text-2xl font-bold">{dayNum}</span>
-            </button>
-          );
-        })}
-      </div>
-    );
   };
 
   // --- Main View Logic ---
@@ -362,9 +338,38 @@ const App: React.FC = () => {
             <div>
                 <h2 className="font-bold text-gray-800 text-lg mb-4 flex items-center gap-2">
                     <Calendar className="w-5 h-5 text-emerald-600" /> 
-                    Tarikh
+                    Tarikh Pilihan
                 </h2>
-                {renderDateSelector()}
+                
+                {/* Native Calendar Input UI (Overlay Strategy) */}
+                <div className="relative w-full group">
+                    {/* Visual Card (Background) */}
+                    <div className="bg-white border-2 border-gray-100 group-hover:border-emerald-400 p-4 rounded-xl flex items-center justify-between shadow-sm transition-colors pointer-events-none">
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                                <CalendarDays className="w-6 h-6" />
+                            </div>
+                            <div>
+                                <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-0.5">Tarikh Main</p>
+                                <p className="font-bold text-gray-800 text-lg group-hover:text-emerald-700 transition-colors">
+                                    {details.date.toLocaleDateString('ms-MY', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                                </p>
+                            </div>
+                        </div>
+                        <div className="text-emerald-600 font-bold text-sm bg-emerald-50 px-3 py-1.5 rounded-lg group-hover:bg-emerald-600 group-hover:text-white transition">
+                            Tukar
+                        </div>
+                    </div>
+
+                    {/* Actual Input (Invisible Overlay) */}
+                    <input
+                        type="date"
+                        min={getFormattedDateValue(new Date())}
+                        value={getFormattedDateValue(details.date)}
+                        onChange={handleDateChange}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                    />
+                </div>
             </div>
 
             {/* Duration Selector */}
