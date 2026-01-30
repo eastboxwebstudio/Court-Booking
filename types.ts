@@ -1,0 +1,44 @@
+export interface Court {
+  id: number;
+  name: string;
+  type: 'Rubber' | 'Parquet' | 'Cement';
+  pricePerHour: number;
+  isAvailable: boolean;
+}
+
+export interface TimeSlot {
+  id: string;
+  time: string; // "20:00"
+  label: string; // "8:00 PM"
+  hour: number; // Raw hour for calculation
+  isBooked: boolean;
+}
+
+export interface BookingDetails {
+  courtId: number | null;
+  date: Date;
+  selectedSlots: string[]; // array of TimeSlot ids
+  duration: number; // Duration in hours (1, 2, 3)
+  totalPrice: number;
+  // New user details
+  userName: string;
+  userEmail: string;
+  userPhone: string;
+  // Timeout logic
+  bookingExpiry: number | null; // Timestamp when booking expires
+}
+
+export enum BookingStep {
+  SELECT_COURT = 1,
+  SELECT_DATE_TIME = 2,
+  SUMMARY = 3,
+  PAYMENT_GATEWAY = 4, // Simulated ToyyibPay page
+  SUCCESS = 5,
+}
+
+export interface Message {
+  id: string;
+  text: string;
+  sender: 'user' | 'ai';
+  timestamp: Date;
+}
