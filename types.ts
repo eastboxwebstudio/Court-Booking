@@ -1,7 +1,8 @@
 export interface Court {
   id: number;
   name: string;
-  type: 'Rubber' | 'Parquet' | 'Cement';
+  type: string; // Surface type e.g. 'Rubber', 'Grass', 'Hard'
+  sport: 'Badminton' | 'Futsal' | 'Pickleball'; // New field
   pricePerHour: number;
   isAvailable: boolean;
 }

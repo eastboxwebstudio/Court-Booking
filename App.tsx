@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { BookingDetails, BookingStep, Court, TimeSlot } from './types';
 import CourtCard from './components/CourtCard';
 import ToyyibPaySimulator from './components/ToyyibPaySimulator';
@@ -16,16 +16,10 @@ import {
   Phone,
   Timer,
   Hourglass,
-  CalendarDays
+  CalendarDays,
+  Activity,
+  Trophy
 } from 'lucide-react';
-
-// Mock Data
-const MOCK_COURTS: Court[] = [
-  { id: 1, name: "Court Dato' Lee", type: 'Rubber', pricePerHour: 20, isAvailable: true },
-  { id: 2, name: "Court Misbun", type: 'Rubber', pricePerHour: 20, isAvailable: true },
-  { id: 3, name: "Court Sidek", type: 'Parquet', pricePerHour: 15, isAvailable: true },
-  { id: 4, name: "Court Zii Jia", type: 'Parquet', pricePerHour: 15, isAvailable: false },
-];
 
 const START_HOUR = 8; // 8 AM
 const END_HOUR = 23; // 11 PM
@@ -35,6 +29,14 @@ const App: React.FC = () => {
   const [step, setStep] = useState<BookingStep>(BookingStep.SELECT_COURT);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   
+  // State for Sport Filter
+  const [selectedSport, setSelectedSport] = useState<'Badminton' | 'Futsal' | 'Pickleball'>('Badminton');
+
+  // Data States
+  const [courts, setCourts] = useState<Court[]>([]);
+  const [bookedSlots, setBookedSlots] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
+
   const [details, setDetails] = useState<BookingDetails>({
     courtId: null,
     date: new Date(),
@@ -47,26 +49,88 @@ const App: React.FC = () => {
     bookingExpiry: null
   });
 
+  // Ref for the date input
+  const dateInputRef = useRef<HTMLInputElement>(null);
+
+  // --- API Fetching ---
+
+  // Fetch Courts on Load
+  useEffect(() => {
+    const fetchCourts = async () => {
+      try {
+        setLoading(true);
+        const res = await fetch('/api/courts');
+        if (res.ok) {
+            const data = await res.json();
+            setCourts(data);
+        } else {
+            // Fallback for dev without backend
+            console.warn("API not found, using empty state");
+        }
+      } catch (e) {
+        console.error("Failed to fetch courts", e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchCourts();
+  }, []);
+
+  // Fetch Booked Slots when Date changes
+  useEffect(() => {
+    const fetchBookings = async () => {
+        const dateStr = getFormattedDateValue(details.date);
+        try {
+            const res = await fetch(`/api/bookings?date=${dateStr}`);
+            if (res.ok) {
+                const data: { timeSlotId: string }[] = await res.json();
+                const bookedSet = new Set(data.map(d => d.timeSlotId));
+                setBookedSlots(bookedSet);
+            }
+        } catch (e) {
+            console.error("Failed to fetch bookings", e);
+        }
+    };
+    fetchBookings();
+  }, [details.date]);
+
+
+  // Generate next 14 days for Quick Date Strip
+  const next14Days = useMemo(() => {
+    const days = [];
+    for (let i = 0; i < 14; i++) {
+        const d = new Date();
+        d.setDate(d.getDate() + i);
+        days.push(d);
+    }
+    return days;
+  }, []);
+
+  // Filter courts based on selected sport
+  const filteredCourts = useMemo(() => 
+    courts.filter(c => c.sport === selectedSport),
+  [selectedSport, courts]);
+
   // Derived state for selected court
   const selectedCourt = useMemo(() => 
-    MOCK_COURTS.find(c => c.id === details.courtId), 
-  [details.courtId]);
+    courts.find(c => c.id === details.courtId), 
+  [details.courtId, courts]);
 
-  // Generate Slots based on date (Mock Availability)
+  // Generate Slots based on date and Real Availability
   const generateTimeSlots = (date: Date): TimeSlot[] => {
     const slots: TimeSlot[] = [];
-    const dayOfMonth = date.getDate(); // Use day of month to vary availability
+    const dateStr = getFormattedDateValue(date);
     
     for (let i = START_HOUR; i <= END_HOUR; i++) {
       const timeStr = `${i}:00`;
       const label = i > 12 ? `${i - 12} PM` : `${i} AM`;
+      const slotId = `${dateStr}-${i}`;
       
-      // Better pseudo-randomness based on Day + Hour
-      // This ensures different days have different patterns
-      const isBooked = ((dayOfMonth + i) % 5 === 0) || ((dayOfMonth * i) % 13 === 0); 
+      // Check against database records
+      const isBooked = bookedSlots.has(slotId);
 
       slots.push({
-        id: `${date.toISOString().split('T')[0]}-${i}`,
+        id: slotId,
         time: timeStr,
         label,
         hour: i,
@@ -80,7 +144,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     setAvailableSlots(generateTimeSlots(details.date));
-  }, [details.date]);
+  }, [details.date, bookedSlots]); // Re-run when bookedSlots updates
 
   // --- Timeout Logic ---
   useEffect(() => {
@@ -118,6 +182,12 @@ const App: React.FC = () => {
     return localDate.toISOString().split('T')[0];
   };
 
+  const isSameDay = (d1: Date, d2: Date) => {
+    return d1.getFullYear() === d2.getFullYear() &&
+           d1.getMonth() === d2.getMonth() &&
+           d1.getDate() === d2.getDate();
+  };
+
 
   // --- Handlers ---
 
@@ -130,6 +200,25 @@ const App: React.FC = () => {
     const newDate = new Date(year, month - 1, day);
     
     setDetails(prev => ({ ...prev, date: newDate, selectedSlots: [] }));
+  };
+
+  const handleSelectDateDirectly = (date: Date) => {
+    setDetails(prev => ({ ...prev, date: date, selectedSlots: [] }));
+  };
+
+  // Safe handler to open picker via button
+  const handleOpenPicker = () => {
+    try {
+        if (dateInputRef.current && typeof dateInputRef.current.showPicker === 'function') {
+            dateInputRef.current.showPicker();
+        } else {
+            // Fallback for older browsers
+            dateInputRef.current?.focus();
+            dateInputRef.current?.click();
+        }
+    } catch (e) {
+        console.warn('Browser prevented showPicker:', e);
+    }
   };
 
   const handleDurationSelect = (hours: number) => {
@@ -189,9 +278,33 @@ const App: React.FC = () => {
     if (step > 1) setStep(step - 1);
   };
 
-  const handlePaymentSuccess = () => {
-    setDetails(prev => ({ ...prev, bookingExpiry: null })); // Stop timer
-    setStep(BookingStep.SUCCESS);
+  const handlePaymentSuccess = async () => {
+    // Save booking to Database
+    try {
+        const payload = {
+            courtId: details.courtId,
+            date: getFormattedDateValue(details.date),
+            selectedSlots: details.selectedSlots,
+            userName: details.userName,
+            userEmail: details.userEmail,
+            userPhone: details.userPhone,
+            totalPrice: details.totalPrice
+        };
+
+        const res = await fetch('/api/bookings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) throw new Error("Booking failed");
+
+        setDetails(prev => ({ ...prev, bookingExpiry: null })); // Stop timer
+        setStep(BookingStep.SUCCESS);
+    } catch (e) {
+        alert("Ralat semasa menyimpan tempahan. Sila hubungi admin.");
+        console.error(e);
+    }
   };
 
   const resetBooking = () => {
@@ -208,6 +321,9 @@ const App: React.FC = () => {
     });
     setStep(BookingStep.SELECT_COURT);
     setTimeLeft(null);
+    // Refresh bookings
+    const dateStr = getFormattedDateValue(new Date());
+    setBookedSlots(new Set()); 
   };
 
   // --- Main View Logic ---
@@ -248,6 +364,7 @@ const App: React.FC = () => {
                   
                   <p className="text-xs text-gray-400 mb-1">Court</p>
                   <p className="font-semibold text-gray-800 mb-4">{selectedCourt?.name}</p>
+                  <p className="text-xs text-gray-500 mb-4">({selectedCourt?.sport})</p>
 
                   <p className="text-xs text-gray-400 mb-1">Tarikh & Masa</p>
                   <p className="font-semibold text-gray-800 mb-4">
@@ -318,90 +435,187 @@ const App: React.FC = () => {
         {/* Step 1: Court Selection */}
         {step === BookingStep.SELECT_COURT && (
           <div className="space-y-4 animate-fade-in-up">
-            <h2 className="font-bold text-gray-800 text-lg mb-2">Senarai Gelanggang</h2>
-            <div className="grid gap-4">
-              {MOCK_COURTS.map(court => (
-                <CourtCard 
-                    key={court.id} 
-                    court={court} 
-                    isSelected={details.courtId === court.id}
-                    onSelect={(id) => setDetails(prev => ({ ...prev, courtId: id, selectedSlots: [], totalPrice: 0 }))}
-                />
-              ))}
+            
+            {/* Sport Category Tabs */}
+            <div className="bg-white p-1 rounded-xl shadow-sm border border-gray-100 flex mb-2">
+                {(['Badminton', 'Futsal', 'Pickleball'] as const).map((sport) => (
+                    <button
+                        key={sport}
+                        onClick={() => {
+                            setSelectedSport(sport);
+                            setDetails(prev => ({ ...prev, courtId: null })); // Reset court selection on sport change
+                        }}
+                        className={`
+                            flex-1 py-2 text-sm font-bold rounded-lg transition-all
+                            ${selectedSport === sport 
+                                ? 'bg-emerald-600 text-white shadow-sm' 
+                                : 'text-gray-500 hover:bg-gray-50'}
+                        `}
+                    >
+                        {sport}
+                    </button>
+                ))}
             </div>
+
+            <h2 className="font-bold text-gray-800 text-lg mb-2 flex items-center gap-2">
+                <Trophy className="w-4 h-4 text-emerald-600" />
+                Senarai Gelanggang {selectedSport}
+            </h2>
+
+            {loading ? (
+                 <div className="text-center py-10">
+                    <div className="animate-spin w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full mx-auto mb-2"></div>
+                    <p className="text-gray-400 text-sm">Memuat turun data...</p>
+                 </div>
+            ) : filteredCourts.length === 0 ? (
+                <div className="text-center py-10 bg-white rounded-xl border border-dashed border-gray-300">
+                    <p className="text-gray-400">Tiada gelanggang tersedia.</p>
+                </div>
+            ) : (
+                <div className="grid gap-4">
+                {filteredCourts.map(court => (
+                    <CourtCard 
+                        key={court.id} 
+                        court={court} 
+                        isSelected={details.courtId === court.id}
+                        onSelect={(id) => setDetails(prev => ({ ...prev, courtId: id, selectedSlots: [], totalPrice: 0 }))}
+                    />
+                ))}
+                </div>
+            )}
           </div>
         )}
 
         {/* Step 2: Date & Time */}
         {step === BookingStep.SELECT_DATE_TIME && (
-          <div className="space-y-6 animate-fade-in-up">
-            <div>
-                <h2 className="font-bold text-gray-800 text-lg mb-4 flex items-center gap-2">
-                    <Calendar className="w-5 h-5 text-emerald-600" /> 
-                    Tarikh Pilihan
-                </h2>
-                
-                {/* Native Calendar Input UI (Overlay Strategy) */}
-                <div className="relative w-full group">
-                    {/* Visual Card (Background) */}
-                    <div className="bg-white border-2 border-gray-100 group-hover:border-emerald-400 p-4 rounded-xl flex items-center justify-between shadow-sm transition-colors pointer-events-none">
-                        <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-                                <CalendarDays className="w-6 h-6" />
-                            </div>
-                            <div>
-                                <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-0.5">Tarikh Main</p>
-                                <p className="font-bold text-gray-800 text-lg group-hover:text-emerald-700 transition-colors">
-                                    {details.date.toLocaleDateString('ms-MY', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-                                </p>
-                            </div>
-                        </div>
-                        <div className="text-emerald-600 font-bold text-sm bg-emerald-50 px-3 py-1.5 rounded-lg group-hover:bg-emerald-600 group-hover:text-white transition">
-                            Tukar
-                        </div>
-                    </div>
+          <div className="space-y-8 animate-fade-in-up">
+            
+            {/* Date Selection - Robust UI without CSS Hacks */}
+            <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+                <div className="flex justify-between items-center mb-4">
+                    <h2 className="font-bold text-gray-800 text-lg flex items-center gap-2">
+                        <Calendar className="w-5 h-5 text-emerald-600" /> 
+                        Pilih Tarikh
+                    </h2>
 
-                    {/* Actual Input (Invisible Overlay) */}
-                    <input
-                        type="date"
-                        min={getFormattedDateValue(new Date())}
-                        value={getFormattedDateValue(details.date)}
-                        onChange={handleDateChange}
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                    />
+                    {/* Hidden Input controlled by button */}
+                    <div className="relative">
+                         <input
+                            ref={dateInputRef}
+                            type="date"
+                            min={getFormattedDateValue(new Date())}
+                            value={getFormattedDateValue(details.date)}
+                            onChange={handleDateChange}
+                            className="absolute opacity-0 w-1 h-1 -z-10" // Hidden visually but accessible to showPicker
+                        />
+                        <button 
+                            onClick={handleOpenPicker}
+                            className="flex items-center gap-2 bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-emerald-100 transition"
+                        >
+                            <CalendarDays className="w-4 h-4" />
+                            Kalendar
+                        </button>
+                    </div>
+                </div>
+
+                {/* Big Date Display */}
+                <div className="flex flex-col items-center justify-center py-6 bg-gradient-to-br from-gray-50 to-white rounded-xl border border-gray-100 mb-4">
+                    <span className="text-xs font-bold text-emerald-600 uppercase tracking-widest mb-1">Tarikh Dipilih</span>
+                    <span className="text-3xl font-extrabold text-gray-800 leading-tight">
+                        {details.date.getDate()}
+                    </span>
+                    <span className="text-lg font-bold text-gray-600">
+                        {details.date.toLocaleDateString('ms-MY', { month: 'long', year: 'numeric' })}
+                    </span>
+                    <span className="text-sm text-gray-400 font-medium mt-1 uppercase">
+                         {details.date.toLocaleDateString('ms-MY', { weekday: 'long' })}
+                    </span>
+                </div>
+
+                {/* Quick Date Strip (Horizontal Scroll) */}
+                <div className="relative">
+                    <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+                        {next14Days.map((d, i) => {
+                            const selected = isSameDay(d, details.date);
+                            return (
+                                <button
+                                    key={i}
+                                    onClick={() => handleSelectDateDirectly(d)}
+                                    className={`
+                                        flex flex-col items-center justify-center min-w-[60px] h-[70px] rounded-lg border transition-all flex-shrink-0
+                                        ${selected 
+                                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-md transform scale-105' 
+                                            : 'bg-white text-gray-600 border-gray-200 hover:border-emerald-300 hover:bg-gray-50'}
+                                    `}
+                                >
+                                    <span className="text-[10px] font-bold uppercase opacity-80">
+                                        {i === 0 ? 'Hari Ini' : d.toLocaleDateString('ms-MY', { weekday: 'short' })}
+                                    </span>
+                                    <span className="text-xl font-bold leading-none mt-1">
+                                        {d.getDate()}
+                                    </span>
+                                </button>
+                            )
+                        })}
+                    </div>
+                     {/* Fade effect on right to indicate scrolling */}
+                    <div className="absolute top-0 right-0 h-full w-8 bg-gradient-to-l from-white to-transparent pointer-events-none"></div>
                 </div>
             </div>
 
-            {/* Duration Selector */}
+            {/* Duration Selector - Grid Design */}
             <div>
                 <h2 className="font-bold text-gray-800 text-lg mb-3 flex items-center gap-2">
                     <Hourglass className="w-5 h-5 text-emerald-600" />
                     Tempoh Main
                 </h2>
-                <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar -mx-6 px-6">
-                    {Array.from({ length: 12 }, (_, i) => i + 1).map(h => (
+                {/* Fixed Grid for Durations - Cleaner and easier to tap */}
+                <div className="grid grid-cols-4 gap-2 sm:gap-3">
+                    {Array.from({ length: 4 }, (_, i) => i + 1).map(h => (
                         <button
                             key={h}
                             onClick={() => handleDurationSelect(h)}
                             className={`
-                                min-w-[80px] py-3 rounded-lg font-bold border transition-all flex-shrink-0
+                                py-3 rounded-xl font-bold border-2 transition-all flex flex-col items-center justify-center
                                 ${details.duration === h 
-                                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-md' 
-                                    : 'bg-white text-gray-600 border-gray-200'}
+                                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-lg scale-[1.02]' 
+                                    : 'bg-white text-gray-600 border-gray-100 hover:border-emerald-200 hover:bg-gray-50'}
                             `}
                         >
-                            {h} Jam
+                            <span className="text-lg">{h}</span>
+                            <span className="text-[10px] uppercase opacity-80">Jam</span>
+                        </button>
+                    ))}
+                     {Array.from({ length: 2 }, (_, i) => i + 5).map(h => (
+                        <button
+                            key={h}
+                            onClick={() => handleDurationSelect(h)}
+                            className={`
+                                py-3 rounded-xl font-bold border-2 transition-all flex flex-col items-center justify-center
+                                ${details.duration === h 
+                                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-lg scale-[1.02]' 
+                                    : 'bg-white text-gray-400 border-gray-100 hover:border-emerald-200 hover:bg-gray-50'}
+                            `}
+                        >
+                           <span className="text-base">{h}</span>
+                           <span className="text-[10px] uppercase opacity-80">Jam</span>
                         </button>
                     ))}
                 </div>
             </div>
 
             <div>
-                <h2 className="font-bold text-gray-800 text-lg mb-4 flex items-center gap-2">
-                    <Clock className="w-5 h-5 text-emerald-600" /> 
-                    Pilih Waktu Mula
-                </h2>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="flex items-center justify-between mb-4">
+                     <h2 className="font-bold text-gray-800 text-lg flex items-center gap-2">
+                        <Clock className="w-5 h-5 text-emerald-600" /> 
+                        Pilih Waktu Mula
+                    </h2>
+                    <span className="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-1 rounded">
+                        {availableSlots.filter(s => !s.isBooked).length} Slot Kosong
+                    </span>
+                </div>
+               
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
                     {availableSlots.map(slot => {
                         const isSelected = details.selectedSlots.includes(slot.id);
                         
@@ -423,19 +637,19 @@ const App: React.FC = () => {
                                 disabled={isDisabled}
                                 onClick={() => handleSlotSelect(slot)}
                                 className={`
-                                    py-3 px-2 rounded-lg text-sm font-medium border transition-all relative
+                                    py-3 px-1 rounded-xl text-sm font-bold border transition-all relative flex flex-col items-center justify-center
                                     ${slot.isBooked 
-                                        ? 'bg-gray-100 text-gray-300 border-gray-100 cursor-not-allowed' 
+                                        ? 'bg-gray-50 text-gray-300 border-transparent cursor-not-allowed' 
                                         : isSelected
-                                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-md transform scale-105 z-10'
+                                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-md ring-2 ring-emerald-200 ring-offset-1 transform scale-105 z-10'
                                             : isDisabled 
-                                                ? 'bg-white text-gray-300 border-gray-100 cursor-not-allowed' // Not booked, but block not available
-                                                : 'bg-white text-gray-700 border-gray-200 hover:border-emerald-300 hover:bg-emerald-50'
+                                                ? 'bg-white text-gray-300 border-gray-100 cursor-not-allowed' 
+                                                : 'bg-white text-gray-700 border-gray-200 hover:border-emerald-400 hover:bg-emerald-50'
                                     }
                                 `}
                             >
                                 {slot.label}
-                                {isSelected && <div className="absolute -top-2 -right-2 bg-yellow-400 text-yellow-900 text-[10px] px-1.5 py-0.5 rounded-full font-bold shadow-sm">{details.duration}J</div>}
+                                {isSelected && <div className="absolute -top-2 -right-2 bg-yellow-400 text-yellow-900 text-[9px] px-1.5 py-0.5 rounded-full font-extrabold shadow-sm">{details.duration}J</div>}
                             </button>
                         )
                     })}
@@ -443,14 +657,22 @@ const App: React.FC = () => {
             </div>
             
             {details.selectedSlots.length > 0 && (
-                 <div className="bg-emerald-50 p-4 rounded-xl flex justify-between items-center border border-emerald-100">
-                    <div>
-                        <span className="text-emerald-800 font-bold block">{details.duration} Jam</span>
-                        <span className="text-xs text-emerald-600">
-                            {details.selectedSlots[0].split('-')[1]}:00 - {parseInt(details.selectedSlots[details.selectedSlots.length-1].split('-')[1]) + 1}:00
-                        </span>
-                    </div>
-                    <span className="text-xl font-bold text-emerald-700">RM {details.totalPrice}</span>
+                 <div className="fixed bottom-20 left-4 right-4 max-w-md mx-auto z-20 animate-fade-in-up">
+                     <div className="bg-gray-900 text-white p-4 rounded-xl flex justify-between items-center shadow-xl border border-gray-800">
+                        <div className="flex items-center gap-3">
+                            <div className="bg-emerald-500 p-2 rounded-lg text-white">
+                                <Activity className="w-5 h-5" />
+                            </div>
+                            <div>
+                                <span className="font-bold block text-sm">{details.duration} Jam</span>
+                                <span className="text-xs text-gray-400">
+                                    {availableSlots.find(s => s.id === details.selectedSlots[0])?.time} - 
+                                    {parseInt(availableSlots.find(s => s.id === details.selectedSlots[details.selectedSlots.length-1])?.time.split(':')[0] || "0") + 1}:00
+                                </span>
+                            </div>
+                        </div>
+                        <span className="text-xl font-bold text-emerald-400">RM {details.totalPrice}</span>
+                     </div>
                  </div>
             )}
           </div>
@@ -515,7 +737,7 @@ const App: React.FC = () => {
                         <div>
                             <p className="text-sm text-gray-500">Gelanggang</p>
                             <p className="font-bold text-gray-800">{selectedCourt?.name}</p>
-                            <p className="text-xs text-gray-400">{selectedCourt?.type} Floor</p>
+                            <p className="text-xs text-gray-400">{selectedCourt?.sport} - {selectedCourt?.type}</p>
                         </div>
                     </div>
 
