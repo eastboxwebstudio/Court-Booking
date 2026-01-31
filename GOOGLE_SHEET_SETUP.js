@@ -14,7 +14,8 @@
  *    - Klik "Advanced" (di kiri bawah dialog).
  *    - Klik "Go to ... (unsafe)".
  *    - Klik "Allow".
- * 6. Selepas berjaya run, klik "Deploy" > "Manage Deployments" > "Edit" > "New Version" > "Deploy".
+ * 6. SELEPAS BERJAYA RUN, ANDA WAJIB DEPLOY SEMULA:
+ *    - Klik "Deploy" > "Manage Deployments" > ikon Pensil (Edit) > Version: "New Version" > "Deploy".
  */
 
 // --- KONFIGURASI TOYYIBPAY ---
@@ -80,7 +81,7 @@ function authorizeScript() {
   try {
     UrlFetchApp.fetch("https://www.google.com");
     console.log("BERJAYA! Skrip kini mempunyai kebenaran UrlFetchApp.");
-    console.log("Sila klik DEPLOY > MANAGE DEPLOYMENTS > EDIT > NEW VERSION > DEPLOY.");
+    console.log("PENTING: Sila klik DEPLOY > MANAGE DEPLOYMENTS > EDIT > NEW VERSION > DEPLOY untuk kemaskini live app.");
   } catch (e) {
     console.log("RALAT: " + e.toString());
   }
@@ -137,9 +138,9 @@ function createToyyibBill(payload) {
     }
     
   } catch (e) {
-    // Tangkap error permission jika user lupa authorize
+    // Tangkap error permission jika user lupa authorize ATAU lupa deploy new version
     if (e.toString().includes("permission")) {
-       return responseJSON({status: 'error', message: 'SERVER PERMISSION ERROR: Sila run authorizeScript() di script editor.'});
+       return responseJSON({status: 'error', message: 'PERMISSION ERROR: Sila run authorizeScript() DAN Deploy New Version.'});
     }
     return responseJSON({status: 'error', message: 'Fetch Error: ' + e.toString()});
   }

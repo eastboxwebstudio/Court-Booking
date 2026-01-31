@@ -111,6 +111,10 @@ const App: React.FC = () => {
             
             // Rehydrate Date object
             savedBooking.date = new Date(savedBooking.date);
+            
+            // EXTEND TIMEOUT: If user returns (fail or success), give them fresh time so it doesn't auto-reset
+            savedBooking.bookingExpiry = Date.now() + BOOKING_TIMEOUT_MS;
+            
             setDetails(savedBooking);
 
             // Clear temporary storage
@@ -128,6 +132,11 @@ const App: React.FC = () => {
                 showToast("Status pembayaran: Pending.", "warning");
                 setStep(BookingStep.SUMMARY);
             }
+        } else {
+             // Edge case: User returns but no local storage (cleared cache or different browser)
+             if (statusId === '1') {
+                showToast("Pembayaran berjaya, tetapi sesi telah tamat. Sila hubungi admin.", "warning");
+             }
         }
         
         // Clean URL to remove query params
@@ -447,9 +456,9 @@ const App: React.FC = () => {
         
         let msg = e.message || "Ralat menghubungkan ke ToyyibPay. Sila cuba lagi.";
         
-        // Detect permission error from GAS
+        // Detect permission error from GAS and suggest Redeploy
         if (msg.includes("permission") || msg.includes("UrlFetchApp") || msg.includes("PERMISSION ERROR")) {
-             msg = "Ralat Server: Sila run function 'authorizeScript' dalam Google Apps Script editor untuk beri izin.";
+             msg = "Ralat: Anda mungkin terlupa tekan 'Deploy New Version' di Google Apps Script selepas memberi izin.";
         }
 
         showToast(msg, "error");
