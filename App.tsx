@@ -33,7 +33,7 @@ import {
 
 // --- CONFIGURATION ---
 // PENTING: Gantikan URL ini dengan URL "Web App" anda sendiri selepas Deploy!
-const GOOGLE_SCRIPT_URL = "https://badmintoncourtbooking.mohdaizatabdullah.workers.dev/"; 
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxT68ovDtZNVoFQ49-7bQb0GaqOryGY2ZN2xXo4KFK-6Ec6zeOhdnqiX9WHBYdYcPAd/exec"; 
 
 const START_HOUR = 8; // 8 AM
 const END_HOUR = 23; // 11 PM
