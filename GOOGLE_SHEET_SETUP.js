@@ -1,11 +1,20 @@
 /**
  * GOOGLE APPS SCRIPT - COURTMAS BACKEND (PRODUCTION)
  * 
- * ARAHAN UPDATE:
- * 1. Copy semua kod ini.
- * 2. Paste di dalam Google Apps Script editor.
- * 3. Save.
- * 4. Klik "Deploy" > "Manage deployments" > Edit (Pencil) > Version: "New version" > Deploy.
+ * !!! PENTING: FIX UNTUK ERROR "You do not have permission to call UrlFetchApp.fetch" !!!
+ * 
+ * ARAHAN:
+ * 1. Copy kod ini ke dalam Google Apps Script.
+ * 2. Save.
+ * 3. Di bahagian toolbar atas, pilih function "authorizeScript" (dropdown menu sebelah butang Debug/Run).
+ * 4. Klik "Run".
+ * 5. Google akan minta izin ("Review Permissions").
+ *    - Klik "Review Permissions".
+ *    - Pilih akaun Google anda.
+ *    - Klik "Advanced" (di kiri bawah dialog).
+ *    - Klik "Go to ... (unsafe)".
+ *    - Klik "Allow".
+ * 6. Selepas berjaya run, klik "Deploy" > "Manage Deployments" > "Edit" > "New Version" > "Deploy".
  */
 
 // --- KONFIGURASI TOYYIBPAY ---
@@ -64,6 +73,19 @@ function doPost(e) {
   }
 }
 
+// --- FUNGSI KHAS: AUTHORIZATION ---
+function authorizeScript() {
+  // Jalankan function ini SEKALI dalam editor untuk memberi izin akses internet
+  console.log("Menguji kebenaran akses internet...");
+  try {
+    UrlFetchApp.fetch("https://www.google.com");
+    console.log("BERJAYA! Skrip kini mempunyai kebenaran UrlFetchApp.");
+    console.log("Sila klik DEPLOY > MANAGE DEPLOYMENTS > EDIT > NEW VERSION > DEPLOY.");
+  } catch (e) {
+    console.log("RALAT: " + e.toString());
+  }
+}
+
 // --- TOYYIBPAY LOGIC ---
 
 function createToyyibBill(payload) {
@@ -115,6 +137,10 @@ function createToyyibBill(payload) {
     }
     
   } catch (e) {
+    // Tangkap error permission jika user lupa authorize
+    if (e.toString().includes("permission")) {
+       return responseJSON({status: 'error', message: 'SERVER PERMISSION ERROR: Sila run authorizeScript() di script editor.'});
+    }
     return responseJSON({status: 'error', message: 'Fetch Error: ' + e.toString()});
   }
 }

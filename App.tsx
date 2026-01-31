@@ -23,7 +23,9 @@ import {
   X,
   Loader2,
   CreditCard,
-  Camera
+  Camera,
+  Share2,
+  ExternalLink
 } from 'lucide-react';
 
 // --- CONFIGURATION ---
@@ -58,6 +60,7 @@ const App: React.FC = () => {
   
   // Payment Processing State
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [paymentUrl, setPaymentUrl] = useState<string | null>(null); // For manual fallback
 
   // Toast State
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -142,7 +145,7 @@ const App: React.FC = () => {
       setToast({ message, type, id });
       setTimeout(() => {
           setToast(prev => prev?.id === id ? null : prev);
-      }, 4000);
+      }, 6000); // Increased duration slightly for reading errors
   };
 
   // --- API Fetching ---
@@ -367,17 +370,37 @@ const App: React.FC = () => {
     if (step > 1) setStep(step - 1);
   };
 
+  const handleShareReceipt = async () => {
+    if (navigator.share) {
+        try {
+            await navigator.share({
+                title: 'Resit Tempahan CourtMas',
+                text: `Tempahan ${selectedCourt?.name} pada ${details.date.toLocaleDateString()} disahkan!`,
+                url: window.location.href, // Or a specific receipt URL if available
+            });
+        } catch (error) {
+            console.log('Error sharing', error);
+        }
+    } else {
+        showToast("Fungsi kongsi tidak disokong pada pelayar ini.", "warning");
+    }
+  };
+
   // --- PAYMENT LOGIC (REAL) ---
 
   const handleInitiatePayment = async () => {
     if (!selectedCourt) return;
     setIsProcessingPayment(true);
+    setPaymentUrl(null); // Reset
     
     try {
         // 1. Save state to localStorage so we can retrieve it after redirect
         localStorage.setItem('tempBooking', JSON.stringify(details));
 
-        // 2. Request Payment URL from Backend
+        // 2. Sanitize Phone Number (Remove spaces, dashes)
+        const cleanPhone = details.userPhone.replace(/[^0-9]/g, '');
+
+        // 3. Request Payment URL from Backend
         const payload = {
             action: 'initiatePayment',
             courtName: selectedCourt.name,
@@ -385,7 +408,7 @@ const App: React.FC = () => {
             totalPrice: details.totalPrice,
             userName: details.userName,
             userEmail: details.userEmail,
-            userPhone: details.userPhone
+            userPhone: cleanPhone // Use sanitized phone
         };
 
         const res = await fetch(GOOGLE_SCRIPT_URL, {
@@ -394,18 +417,42 @@ const App: React.FC = () => {
             body: JSON.stringify(payload)
         });
 
-        const data = await res.json();
+        // 4. Handle Response safely (it might be HTML error page from Google)
+        const text = await res.text();
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (jsonError) {
+            console.error("Non-JSON response from server:", text);
+            throw new Error("Ralat Server: Sila pastikan anda telah tekan 'Deploy New Version' dalam Google Apps Script.");
+        }
 
         if (data.status === 'success' && data.paymentUrl) {
-            // 3. Redirect to ToyyibPay
-            window.location.href = data.paymentUrl;
+            setPaymentUrl(data.paymentUrl);
+            
+            // 5. Redirect to ToyyibPay
+            // We use setTimeout to allow state update and show "Redirecting..." UI
+            // Also provides time for user to click manual link if auto-redirect is blocked
+            setTimeout(() => {
+                window.location.href = data.paymentUrl;
+            }, 1000); 
+
         } else {
+            // Throw specific error from backend (e.g. "Category Code Not Found" or "PERMISSION ERROR")
             throw new Error(data.message || 'Gagal mendapatkan link pembayaran.');
         }
 
     } catch (e: any) {
         console.error("Payment Init Error:", e);
-        showToast("Ralat menghubungkan ke ToyyibPay. Sila cuba lagi.", "error");
+        
+        let msg = e.message || "Ralat menghubungkan ke ToyyibPay. Sila cuba lagi.";
+        
+        // Detect permission error from GAS
+        if (msg.includes("permission") || msg.includes("UrlFetchApp") || msg.includes("PERMISSION ERROR")) {
+             msg = "Ralat Server: Sila run function 'authorizeScript' dalam Google Apps Script editor untuk beri izin.";
+        }
+
+        showToast(msg, "error");
         setIsProcessingPayment(false);
     }
   };
@@ -474,8 +521,25 @@ const App: React.FC = () => {
       return (
         <div className="fixed inset-0 z-50 bg-white flex flex-col items-center justify-center p-6 text-center">
             <Loader2 className="w-16 h-16 text-emerald-600 animate-spin mb-6" />
-            <h2 className="text-xl font-bold text-gray-800 mb-2">Sedang Memproses...</h2>
-            <p className="text-gray-500">Sila tunggu sebentar. Jangan tutup tetingkap ini.</p>
+            <h2 className="text-xl font-bold text-gray-800 mb-2">
+                {paymentUrl ? "Mengalihkan ke Bank..." : "Sedang Memproses..."}
+            </h2>
+            <p className="text-gray-500 mb-6 max-w-xs">
+                {paymentUrl 
+                    ? "Sila tunggu sebentar. Jika tidak dialihkan secara automatik, tekan butang di bawah." 
+                    : "Sila tunggu sebentar. Jangan tutup tetingkap ini."}
+            </p>
+            
+            {/* Fallback Manual Link */}
+            {paymentUrl && (
+                <a 
+                    href={paymentUrl}
+                    className="flex items-center gap-2 bg-emerald-100 text-emerald-700 px-6 py-3 rounded-xl font-bold hover:bg-emerald-200 transition animate-pulse"
+                >
+                    <ExternalLink className="w-5 h-5" />
+                    Bayar Manual Di Sini
+                </a>
+            )}
         </div>
       );
   }
@@ -503,7 +567,7 @@ const App: React.FC = () => {
                 Resit telah dihantar ke <span className="font-semibold">{details.userEmail}</span>.
               </p>
               
-              <div className="bg-gray-50 p-6 rounded-xl w-full max-w-sm mb-6 text-left border border-gray-100">
+              <div className="bg-gray-50 p-6 rounded-xl w-full max-w-sm mb-6 text-left border border-gray-100 shadow-inner">
                   <p className="text-xs text-gray-400 mb-1">ID Tempahan</p>
                   <p className="font-mono font-bold text-gray-800 mb-4">#TOYYIB-{Math.floor(Math.random() * 10000)}</p>
                   
@@ -521,22 +585,34 @@ const App: React.FC = () => {
 
               <div className="flex items-center justify-center gap-2 text-gray-400 text-xs mb-8">
                   <Camera className="w-4 h-4" />
-                  <span>Sila tangkap layar (screenshot) resit ini sebagai rujukan.</span>
+                  <span>Sila tangkap layar (screenshot) resit ini.</span>
+              </div>
+
+              <div className="flex flex-col gap-3 w-full max-w-xs">
+                {navigator.share && (
+                    <button 
+                        onClick={handleShareReceipt}
+                        className="w-full flex items-center justify-center gap-2 bg-emerald-100 text-emerald-700 py-3 rounded-xl font-bold hover:bg-emerald-200 transition"
+                    >
+                        <Share2 className="w-4 h-4" />
+                        Kongsi Resit
+                    </button>
+                )}
+                
+                <button 
+                    onClick={resetBooking}
+                    className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold shadow-lg hover:bg-emerald-700 transition"
+                >
+                    Tempah Lagi
+                </button>
               </div>
 
               {isOfflineMode && (
-                <div className="mb-8 p-3 bg-yellow-50 text-yellow-700 text-xs rounded-lg border border-yellow-100">
+                <div className="mt-8 p-3 bg-yellow-50 text-yellow-700 text-xs rounded-lg border border-yellow-100 max-w-xs">
                     <p className="font-bold">Mod Luar Talian</p>
                     <p>Tempahan ini disimpan secara tempatan kerana sambungan ke server gagal.</p>
                 </div>
               )}
-
-              <button 
-                onClick={resetBooking}
-                className="w-full max-w-xs bg-emerald-600 text-white py-3 rounded-xl font-bold shadow-lg hover:bg-emerald-700 transition"
-              >
-                  Tempah Lagi
-              </button>
           </div>
       )
   }
