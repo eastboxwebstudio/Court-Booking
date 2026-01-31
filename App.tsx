@@ -28,7 +28,8 @@ import {
   ExternalLink,
   Settings,
   HelpCircle,
-  FileText
+  FileText,
+  RefreshCw
 } from 'lucide-react';
 
 // --- CONFIGURATION ---
@@ -101,51 +102,60 @@ const App: React.FC = () => {
     return localDate.toISOString().split('T')[0];
   };
 
-  // --- INITIALIZATION: Check Return URL (Payment Success) ---
+  // --- INITIALIZATION ---
+  
+  // 1. Check Config & Return URL
   useEffect(() => {
+    // VALIDATION: Check if user put the wrong URL in GOOGLE_SCRIPT_URL
+    if (GOOGLE_SCRIPT_URL.includes("workers.dev") || GOOGLE_SCRIPT_URL.includes("pages.dev") || GOOGLE_SCRIPT_URL.includes("vercel.app")) {
+        alert("RALAT CONFIG: Anda telah memasukkan URL Website ke dalam 'GOOGLE_SCRIPT_URL' di App.tsx. Sila masukkan URL Google Apps Script (bermula dengan script.google.com).");
+    }
+
+    // LOAD SAVED USER DETAILS (Convenience feature)
+    const savedUser = localStorage.getItem('userProfile');
+    if (savedUser) {
+        try {
+            const { name, email, phone } = JSON.parse(savedUser);
+            setDetails(prev => ({
+                ...prev,
+                userName: name || '',
+                userEmail: email || '',
+                userPhone: phone || ''
+            }));
+        } catch (e) {
+            console.error("Failed to load saved user profile");
+        }
+    }
+
     // Check if we have returned from ToyyibPay
     const params = new URLSearchParams(window.location.search);
     const statusId = params.get('status_id');
     const billCode = params.get('billcode');
 
     if (statusId) {
-        // Retrieve temporary booking details
         const savedBookingJson = localStorage.getItem('tempBooking');
-        
         if (savedBookingJson) {
             const savedBooking = JSON.parse(savedBookingJson);
-            
-            // Rehydrate Date object
             savedBooking.date = new Date(savedBooking.date);
-            
-            // EXTEND TIMEOUT: If user returns (fail or success), give them fresh time so it doesn't auto-reset
             savedBooking.bookingExpiry = Date.now() + BOOKING_TIMEOUT_MS;
             
             setDetails(savedBooking);
-
-            // Clear temporary storage
             localStorage.removeItem('tempBooking');
 
             if (statusId === '1') {
-                // Payment Successful
                 saveBookingToSheet(savedBooking, billCode || undefined);
             } else if (statusId === '3') {
-                // Payment Failed
                 showToast("Pembayaran tidak berjaya atau dibatalkan.", "error");
-                setStep(BookingStep.SUMMARY); // Go back to summary
+                setStep(BookingStep.SUMMARY);
             } else {
-                // Pending or other status
                 showToast("Status pembayaran: Pending.", "warning");
                 setStep(BookingStep.SUMMARY);
             }
         } else {
-             // Edge case: User returns but no local storage (cleared cache or different browser)
              if (statusId === '1') {
                 showToast("Pembayaran berjaya, tetapi sesi telah tamat. Sila hubungi admin.", "warning");
              }
         }
-        
-        // Clean URL to remove query params
         window.history.replaceState({}, document.title, "/");
     }
 
@@ -154,43 +164,35 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // --- Helper: Toast ---
-  const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'error') => {
-      const id = Date.now();
-      setToast({ message, type, id });
-      setTimeout(() => {
-          setToast(prev => prev?.id === id ? null : prev);
-      }, 6000); // Increased duration slightly for reading errors
-  };
-
   // --- API Fetching ---
+  const fetchCourts = async () => {
+    setLoading(true);
+    try {
+      if (configError) throw new Error("Config not set");
+
+      const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getCourts`);
+      if (!res.ok) throw new Error("Network response was not ok");
+      
+      const data = await res.json();
+      
+      if (Array.isArray(data) && data.length > 0) {
+          setCourts(data);
+          setIsOfflineMode(false);
+          showToast("Bersambung ke server.", "success");
+      } else {
+          throw new Error("Invalid or empty data from sheet");
+      }
+    } catch (e) {
+      console.warn("Using Offline Data (Courts):", e);
+      setCourts(MOCK_COURTS);
+      setIsOfflineMode(true);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Fetch Courts on Load
   useEffect(() => {
-    const fetchCourts = async () => {
-      setLoading(true);
-      try {
-        if (configError) throw new Error("Config not set");
-
-        const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getCourts`);
-        if (!res.ok) throw new Error("Network response was not ok");
-        
-        const data = await res.json();
-        
-        if (Array.isArray(data) && data.length > 0) {
-            setCourts(data);
-            setIsOfflineMode(false);
-        } else {
-            throw new Error("Invalid or empty data from sheet");
-        }
-      } catch (e) {
-        console.warn("Using Offline Data (Courts):", e);
-        setCourts(MOCK_COURTS);
-        setIsOfflineMode(true);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchCourts();
   }, [configError]);
 
@@ -218,6 +220,19 @@ const App: React.FC = () => {
     fetchBookings();
   }, [details.date, configError]);
 
+  // --- Auto-Save User Profile ---
+  const handleUserDetailsChange = (field: 'userName' | 'userEmail' | 'userPhone', value: string) => {
+      setDetails(prev => {
+          const newDetails = { ...prev, [field]: value };
+          // Save to local storage for future visits
+          localStorage.setItem('userProfile', JSON.stringify({
+              name: newDetails.userName,
+              email: newDetails.userEmail,
+              phone: newDetails.userPhone
+          }));
+          return newDetails;
+      });
+  };
 
   // Generate next 14 days for Quick Date Strip
   const next14Days = useMemo(() => {
@@ -522,15 +537,19 @@ const App: React.FC = () => {
 
   const resetBooking = () => {
     localStorage.removeItem('tempBooking');
+    // Keep user details in local state for convenience, even if not in localStorage 'tempBooking'
+    const savedUser = localStorage.getItem('userProfile');
+    const userDefaults = savedUser ? JSON.parse(savedUser) : {};
+
     setDetails({
         courtId: null,
         date: new Date(),
         selectedSlots: [],
         duration: 1,
         totalPrice: 0,
-        userName: '',
-        userEmail: '',
-        userPhone: '',
+        userName: userDefaults.name || details.userName,
+        userEmail: userDefaults.email || details.userEmail,
+        userPhone: userDefaults.phone || details.userPhone,
         bookingExpiry: null
     });
     setStep(BookingStep.SELECT_COURT);
@@ -538,6 +557,15 @@ const App: React.FC = () => {
     setTimeLeft(null);
     const dateStr = getFormattedDateValue(new Date());
     setBookedSlots(new Set()); 
+  };
+
+  // --- Helper: Toast ---
+  const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'error') => {
+      const id = Date.now();
+      setToast({ message, type, id });
+      setTimeout(() => {
+          setToast(prev => prev?.id === id ? null : prev);
+      }, 6000); 
   };
 
   // --- Main View Logic ---
@@ -722,10 +750,14 @@ const App: React.FC = () => {
             <h1 className="text-2xl font-bold tracking-tight">CourtMas 🏸</h1>
             <div className="flex items-center gap-3">
                 {isOfflineMode && (
-                    <div className="bg-yellow-500/20 px-2 py-1 rounded-full flex items-center gap-1" title="Offline Mode">
-                        <WifiOff className="w-3 h-3 text-yellow-200" />
+                    <button 
+                        onClick={fetchCourts}
+                        className="bg-yellow-500/20 px-2 py-1 rounded-full flex items-center gap-1 active:scale-95 transition" 
+                        title="Klik untuk cuba sambung semula"
+                    >
+                        <RefreshCw className="w-3 h-3 text-yellow-200" />
                         <span className="text-[10px] font-bold text-yellow-100">Offline</span>
-                    </div>
+                    </button>
                 )}
                 <div className="w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center">
                     <User className="w-5 h-5" />
@@ -1025,7 +1057,7 @@ const App: React.FC = () => {
                             <input 
                                 type="text"
                                 value={details.userName}
-                                onChange={(e) => setDetails({...details, userName: e.target.value})}
+                                onChange={(e) => handleUserDetailsChange('userName', e.target.value)}
                                 placeholder="Contoh: Ali Bin Abu"
                                 className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                             />
@@ -1038,7 +1070,7 @@ const App: React.FC = () => {
                             <input 
                                 type="email"
                                 value={details.userEmail}
-                                onChange={(e) => setDetails({...details, userEmail: e.target.value})}
+                                onChange={(e) => handleUserDetailsChange('userEmail', e.target.value)}
                                 placeholder="ali@example.com"
                                 className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                             />
@@ -1051,7 +1083,7 @@ const App: React.FC = () => {
                             <input 
                                 type="tel"
                                 value={details.userPhone}
-                                onChange={(e) => setDetails({...details, userPhone: e.target.value})}
+                                onChange={(e) => handleUserDetailsChange('userPhone', e.target.value)}
                                 placeholder="012-3456789"
                                 className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                             />

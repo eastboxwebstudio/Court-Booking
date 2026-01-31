@@ -21,14 +21,25 @@
  * 
  *    - Pada bahagian Version, pilih "New version".
  *    - Klik "Deploy".
+ *    - COPY URL Web App yang bermula dengan https://script.google.com/... dan masukkan dalam App.tsx
  */
 
 // --- KONFIGURASI TOYYIBPAY ---
 const TOYYIB_SECRET_KEY = '4hocj8ko-nvuz-djra-pbfa-3vmdujvh11dm';
 const TOYYIB_CATEGORY_CODE = '4s8uxwdx';
+
+// URL Website anda (Tempat user akan dihantar selepas bayar)
 const RETURN_URL = 'https://badmintoncourtbooking.mohdaizatabdullah.workers.dev/';
 
 function doGet(e) {
+  // SAFETY CHECK: Jika user tekan Run secara manual di editor
+  if (!e || !e.parameter) {
+    console.error("⚠️ JANGAN RUN 'doGet' SECARA MANUAL.");
+    console.error("Sila pilih function 'authorizeScript' untuk setup permission.");
+    console.error("Atau Deploy sebagai Web App untuk menggunakan function ini.");
+    return ContentService.createTextOutput("Ralat: Function ini dijalankan secara manual. Sila lihat Logs.");
+  }
+
   const params = e.parameter;
   const action = params.action;
   
@@ -42,6 +53,12 @@ function doGet(e) {
 }
 
 function doPost(e) {
+  // SAFETY CHECK: Jika user tekan Run secara manual di editor
+  if (!e) {
+    console.error("⚠️ JANGAN RUN 'doPost' SECARA MANUAL.");
+    return ContentService.createTextOutput("Ralat: Function ini dijalankan secara manual. Sila lihat Logs.");
+  }
+
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) {
      return responseJSON({status: 'error', message: 'Server busy, please try again.'});
