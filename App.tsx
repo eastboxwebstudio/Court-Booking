@@ -32,7 +32,8 @@ import {
 } from 'lucide-react';
 
 // --- CONFIGURATION ---
-const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxT68ovDtZNVoFQ49-7bQb0GaqOryGY2ZN2xXo4KFK-6Ec6zeOhdnqiX9WHBYdYcPAd/exec"; 
+// PENTING: Gantikan URL ini dengan URL "Web App" anda sendiri selepas Deploy!
+const GOOGLE_SCRIPT_URL = "https://badmintoncourtbooking.mohdaizatabdullah.workers.dev/"; 
 
 const START_HOUR = 8; // 8 AM
 const END_HOUR = 23; // 11 PM
@@ -545,30 +546,45 @@ const App: React.FC = () => {
   if (showHelpModal) {
     return (
         <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl relative">
+            <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl relative max-h-[90vh] overflow-y-auto">
                 <div className="flex items-center gap-3 mb-4 text-red-600">
                     <Settings className="w-8 h-8" />
                     <h2 className="text-xl font-bold">Ralat Konfigurasi Server</h2>
                 </div>
                 
                 <p className="text-gray-600 mb-4 text-sm">
-                    Google Apps Script menghalang sambungan ke ToyyibPay kerana tetapan Deployment yang salah.
+                    Aplikasi gagal berhubung dengan Google Apps Script. Ini biasanya berlaku kerana 3 sebab utama.
                 </p>
 
-                <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6 text-sm">
-                    <p className="font-bold mb-2">Sila betulkan tetapan ini di Google Apps Script:</p>
-                    <ol className="list-decimal list-inside space-y-2 text-gray-700">
-                        <li>Buka <strong>Google Apps Script</strong>.</li>
-                        <li>Klik <strong>Deploy</strong> {'>'} <strong>Manage Deployments</strong>.</li>
-                        <li>Klik ikon <strong>Pensil (Edit)</strong>.</li>
-                        <li>
-                            <span className="text-red-600 font-bold">PENTING:</span> Tukar <strong>Execute as</strong> kepada <strong>"Me"</strong> (Email anda).
-                            <br/><span className="text-xs text-gray-500 ml-5">(Jangan guna 'User accessing the web app')</span>
-                        </li>
-                        <li>Pastikan <strong>Who has access</strong> ialah <strong>"Anyone"</strong>.</li>
-                        <li>Pada bahagian Version, pilih <strong>New version</strong>.</li>
-                        <li>Klik <strong>Deploy</strong>.</li>
-                    </ol>
+                <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6 text-sm space-y-4">
+                    
+                    {/* Sebab 1: URL */}
+                    <div>
+                        <p className="font-bold text-gray-800 mb-1">1. URL Skrip Salah</p>
+                        <p className="text-xs text-gray-600">Adakah anda sudah menukar <code>const GOOGLE_SCRIPT_URL</code> di dalam fail <code>App.tsx</code> kepada URL anda sendiri?</p>
+                    </div>
+
+                    {/* Sebab 2: Permission */}
+                    <div>
+                        <p className="font-bold text-gray-800 mb-1">2. Belum Authorize (Izin)</p>
+                        <ul className="list-disc list-inside text-xs text-gray-600 pl-1">
+                            <li>Buka Google Apps Script.</li>
+                            <li>Pilih function <code>authorizeScript</code> di atas toolbar.</li>
+                            <li>Tekan <strong>Run</strong> dan berikan kebenaran (Review Permissions).</li>
+                        </ul>
+                    </div>
+
+                    {/* Sebab 3: Deployment */}
+                    <div>
+                        <p className="font-bold text-gray-800 mb-1">3. Deployment Salah</p>
+                        <ul className="list-disc list-inside text-xs text-gray-600 pl-1">
+                            <li>Klik <strong>Deploy</strong> {'>'} <strong>Manage Deployments</strong>.</li>
+                            <li>Edit (Ikon Pensil).</li>
+                            <li><strong>Execute as:</strong> Me (Email anda).</li>
+                            <li><strong>Who has access:</strong> Anyone.</li>
+                            <li><strong>Version:</strong> New version.</li>
+                        </ul>
+                    </div>
                 </div>
 
                 <button 
