@@ -33,8 +33,7 @@ export enum BookingStep {
   SELECT_COURT = 1,
   SELECT_DATE_TIME = 2,
   SUMMARY = 3,
-  PAYMENT_GATEWAY = 4, // Simulated ToyyibPay page
-  SUCCESS = 5,
+  SUCCESS = 4, // Updated sequence
 }
 
 export interface Message {

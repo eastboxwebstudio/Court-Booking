@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Loader2, ShieldCheck, AlertCircle } from 'lucide-react';
 
 interface ToyyibPaySimulatorProps {
@@ -9,21 +9,33 @@ interface ToyyibPaySimulatorProps {
 
 const ToyyibPaySimulator: React.FC<ToyyibPaySimulatorProps> = ({ amount, onSuccess, onCancel }) => {
   const [status, setStatus] = useState<'loading' | 'confirm' | 'processing'>('loading');
+  const timerRef = useRef<number | null>(null);
 
   // Simulate loading the gateway
   useEffect(() => {
-    const timer = setTimeout(() => {
+    timerRef.current = window.setTimeout(() => {
       setStatus('confirm');
     }, 1500);
-    return () => clearTimeout(timer);
+    return () => {
+        if (timerRef.current) clearTimeout(timerRef.current);
+    };
   }, []);
 
   const handlePay = () => {
     setStatus('processing');
-    setTimeout(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    
+    timerRef.current = window.setTimeout(() => {
       onSuccess();
     }, 2000);
   };
+
+  // Cleanup on unmount for payment timer
+  useEffect(() => {
+      return () => {
+          if (timerRef.current) clearTimeout(timerRef.current);
+      }
+  }, []);
 
   if (status === 'loading') {
     return (

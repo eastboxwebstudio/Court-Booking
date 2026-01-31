@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { BookingDetails, BookingStep, Court, TimeSlot } from './types';
 import CourtCard from './components/CourtCard';
-import ToyyibPaySimulator from './components/ToyyibPaySimulator';
 import ChatBot from './components/ChatBot';
 import { 
   Calendar, 
@@ -18,16 +17,50 @@ import {
   Hourglass,
   CalendarDays,
   Activity,
-  Trophy
+  Trophy,
+  AlertCircle,
+  WifiOff,
+  X,
+  Loader2,
+  CreditCard,
+  Camera
 } from 'lucide-react';
+
+// --- CONFIGURATION ---
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxT68ovDtZNVoFQ49-7bQb0GaqOryGY2ZN2xXo4KFK-6Ec6zeOhdnqiX9WHBYdYcPAd/exec"; 
 
 const START_HOUR = 8; // 8 AM
 const END_HOUR = 23; // 11 PM
 const BOOKING_TIMEOUT_MS = 15 * 60 * 1000; // 15 Minutes
 
+// --- MOCK DATA (Fallback) ---
+const MOCK_COURTS: Court[] = [
+  { id: 1, name: "Court Dato' Lee", type: 'Rubber', sport: 'Badminton', pricePerHour: 20, isAvailable: true },
+  { id: 2, name: "Court Misbun", type: 'Rubber', sport: 'Badminton', pricePerHour: 20, isAvailable: true },
+  { id: 3, name: "Court Sidek", type: 'Parquet', sport: 'Badminton', pricePerHour: 15, isAvailable: true },
+  { id: 4, name: "Arena Harimau", type: 'FIFA Turf', sport: 'Futsal', pricePerHour: 80, isAvailable: true },
+  { id: 5, name: "Arena Bunga Raya", type: 'Vinyl', sport: 'Futsal', pricePerHour: 70, isAvailable: true },
+  { id: 6, name: "Pickle Pro A", type: 'Hard Court', sport: 'Pickleball', pricePerHour: 25, isAvailable: true },
+  { id: 7, name: "Pickle Pro B", type: 'Hard Court', sport: 'Pickleball', pricePerHour: 25, isAvailable: true },
+];
+
+interface ToastState {
+    message: string;
+    type: 'success' | 'error' | 'warning';
+    id: number;
+}
+
 const App: React.FC = () => {
   const [step, setStep] = useState<BookingStep>(BookingStep.SELECT_COURT);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  const [configError, setConfigError] = useState(false);
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
+  
+  // Payment Processing State
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+
+  // Toast State
+  const [toast, setToast] = useState<ToastState | null>(null);
   
   // State for Sport Filter
   const [selectedSport, setSelectedSport] = useState<'Badminton' | 'Futsal' | 'Pickleball'>('Badminton');
@@ -52,47 +85,120 @@ const App: React.FC = () => {
   // Ref for the date input
   const dateInputRef = useRef<HTMLInputElement>(null);
 
+  // --- HELPER: Date Formatting ---
+  const getFormattedDateValue = (date: Date) => {
+    const offset = date.getTimezoneOffset();
+    const localDate = new Date(date.getTime() - (offset * 60 * 1000));
+    return localDate.toISOString().split('T')[0];
+  };
+
+  // --- INITIALIZATION: Check Return URL (Payment Success) ---
+  useEffect(() => {
+    // Check if we have returned from ToyyibPay
+    const params = new URLSearchParams(window.location.search);
+    const statusId = params.get('status_id');
+    const billCode = params.get('billcode');
+
+    if (statusId) {
+        // Retrieve temporary booking details
+        const savedBookingJson = localStorage.getItem('tempBooking');
+        
+        if (savedBookingJson) {
+            const savedBooking = JSON.parse(savedBookingJson);
+            
+            // Rehydrate Date object
+            savedBooking.date = new Date(savedBooking.date);
+            setDetails(savedBooking);
+
+            // Clear temporary storage
+            localStorage.removeItem('tempBooking');
+
+            if (statusId === '1') {
+                // Payment Successful
+                saveBookingToSheet(savedBooking, billCode || undefined);
+            } else if (statusId === '3') {
+                // Payment Failed
+                showToast("Pembayaran tidak berjaya atau dibatalkan.", "error");
+                setStep(BookingStep.SUMMARY); // Go back to summary
+            } else {
+                // Pending or other status
+                showToast("Status pembayaran: Pending.", "warning");
+                setStep(BookingStep.SUMMARY);
+            }
+        }
+        
+        // Clean URL to remove query params
+        window.history.replaceState({}, document.title, "/");
+    }
+
+    if (GOOGLE_SCRIPT_URL.includes("REPLACE_ME")) {
+        setConfigError(true);
+    }
+  }, []);
+
+  // --- Helper: Toast ---
+  const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'error') => {
+      const id = Date.now();
+      setToast({ message, type, id });
+      setTimeout(() => {
+          setToast(prev => prev?.id === id ? null : prev);
+      }, 4000);
+  };
+
   // --- API Fetching ---
 
   // Fetch Courts on Load
   useEffect(() => {
     const fetchCourts = async () => {
+      setLoading(true);
       try {
-        setLoading(true);
-        const res = await fetch('/api/courts');
-        if (res.ok) {
-            const data = await res.json();
+        if (configError) throw new Error("Config not set");
+
+        const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getCourts`);
+        if (!res.ok) throw new Error("Network response was not ok");
+        
+        const data = await res.json();
+        
+        if (Array.isArray(data) && data.length > 0) {
             setCourts(data);
+            setIsOfflineMode(false);
         } else {
-            // Fallback for dev without backend
-            console.warn("API not found, using empty state");
+            throw new Error("Invalid or empty data from sheet");
         }
       } catch (e) {
-        console.error("Failed to fetch courts", e);
+        console.warn("Using Offline Data (Courts):", e);
+        setCourts(MOCK_COURTS);
+        setIsOfflineMode(true);
       } finally {
         setLoading(false);
       }
     };
     fetchCourts();
-  }, []);
+  }, [configError]);
 
   // Fetch Booked Slots when Date changes
   useEffect(() => {
     const fetchBookings = async () => {
         const dateStr = getFormattedDateValue(details.date);
         try {
-            const res = await fetch(`/api/bookings?date=${dateStr}`);
-            if (res.ok) {
-                const data: { timeSlotId: string }[] = await res.json();
-                const bookedSet = new Set(data.map(d => d.timeSlotId));
+            if (configError) throw new Error("Config not set");
+
+            const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getBookings&date=${dateStr}`);
+            if (!res.ok) throw new Error("Network response was not ok");
+            
+            const data = await res.json();
+            
+            if (Array.isArray(data)) {
+                const bookedSet = new Set(data.map((d: any) => d.timeSlotId));
                 setBookedSlots(bookedSet);
             }
         } catch (e) {
-            console.error("Failed to fetch bookings", e);
+            console.warn("Using Offline Data (Bookings):", e);
+            setBookedSlots(new Set()); 
         }
     };
     fetchBookings();
-  }, [details.date]);
+  }, [details.date, configError]);
 
 
   // Generate next 14 days for Quick Date Strip
@@ -126,7 +232,6 @@ const App: React.FC = () => {
       const label = i > 12 ? `${i - 12} PM` : `${i} AM`;
       const slotId = `${dateStr}-${i}`;
       
-      // Check against database records
       const isBooked = bookedSlots.has(slotId);
 
       slots.push({
@@ -144,17 +249,17 @@ const App: React.FC = () => {
 
   useEffect(() => {
     setAvailableSlots(generateTimeSlots(details.date));
-  }, [details.date, bookedSlots]); // Re-run when bookedSlots updates
+  }, [details.date, bookedSlots]); 
 
   // --- Timeout Logic ---
   useEffect(() => {
     let interval: any;
 
-    if ((step === BookingStep.SUMMARY || step === BookingStep.PAYMENT_GATEWAY) && details.bookingExpiry) {
+    if (step === BookingStep.SUMMARY && details.bookingExpiry) {
       interval = setInterval(() => {
         const remaining = details.bookingExpiry! - Date.now();
         if (remaining <= 0) {
-          alert("Masa pembayaran tamat (15 Minit). Sila buat tempahan semula.");
+          showToast("Masa pembayaran tamat (15 Minit). Sila buat tempahan semula.", "error");
           resetBooking();
         } else {
           setTimeLeft(remaining);
@@ -175,30 +280,18 @@ const App: React.FC = () => {
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  // Helper to format Date for Input value (YYYY-MM-DD)
-  const getFormattedDateValue = (date: Date) => {
-    const offset = date.getTimezoneOffset();
-    const localDate = new Date(date.getTime() - (offset * 60 * 1000));
-    return localDate.toISOString().split('T')[0];
-  };
-
   const isSameDay = (d1: Date, d2: Date) => {
     return d1.getFullYear() === d2.getFullYear() &&
            d1.getMonth() === d2.getMonth() &&
            d1.getDate() === d2.getDate();
   };
 
-
   // --- Handlers ---
 
   const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.value) return;
-    
-    // Create Date from YYYY-MM-DD string treating it as Local Time
     const [year, month, day] = e.target.value.split('-').map(Number);
-    // Note: Month is 0-indexed in JS Date constructor
     const newDate = new Date(year, month - 1, day);
-    
     setDetails(prev => ({ ...prev, date: newDate, selectedSlots: [] }));
   };
 
@@ -206,13 +299,11 @@ const App: React.FC = () => {
     setDetails(prev => ({ ...prev, date: date, selectedSlots: [] }));
   };
 
-  // Safe handler to open picker via button
   const handleOpenPicker = () => {
     try {
         if (dateInputRef.current && typeof dateInputRef.current.showPicker === 'function') {
             dateInputRef.current.showPicker();
         } else {
-            // Fallback for older browsers
             dateInputRef.current?.focus();
             dateInputRef.current?.click();
         }
@@ -228,14 +319,13 @@ const App: React.FC = () => {
   const handleSlotSelect = (startSlot: TimeSlot) => {
     if (startSlot.isBooked) return;
 
-    // Check if subsequent slots are available for the duration
     const slotsToBook: string[] = [];
     let isValid = true;
 
     for (let i = 0; i < details.duration; i++) {
         const targetHour = startSlot.hour + i;
         if (targetHour > END_HOUR) {
-            isValid = false; // Exceeds operating hours
+            isValid = false; 
             break;
         }
         
@@ -254,7 +344,7 @@ const App: React.FC = () => {
             totalPrice: selectedCourt.pricePerHour * prev.duration
         }));
     } else {
-        alert(`Slot tidak mencukupi untuk tempahan ${details.duration} jam.`);
+        showToast(`Slot tidak mencukupi untuk tempahan ${details.duration} jam.`, "warning");
     }
   };
 
@@ -262,52 +352,104 @@ const App: React.FC = () => {
     if (step === BookingStep.SELECT_COURT && details.courtId) {
       setStep(BookingStep.SELECT_DATE_TIME);
     } else if (step === BookingStep.SELECT_DATE_TIME && details.selectedSlots.length > 0) {
-      // Start the timer when moving to summary
       setDetails(prev => ({ ...prev, bookingExpiry: Date.now() + BOOKING_TIMEOUT_MS }));
       setStep(BookingStep.SUMMARY);
     } else if (step === BookingStep.SUMMARY) {
-      setStep(BookingStep.PAYMENT_GATEWAY);
+      // Step 3 Next -> Initiate Payment (Real)
+      handleInitiatePayment();
     }
   };
 
   const handleBack = () => {
     if (step === BookingStep.SUMMARY) {
-        // Clear timer if going back to edit
         setDetails(prev => ({ ...prev, bookingExpiry: null }));
     }
     if (step > 1) setStep(step - 1);
   };
 
-  const handlePaymentSuccess = async () => {
-    // Save booking to Database
+  // --- PAYMENT LOGIC (REAL) ---
+
+  const handleInitiatePayment = async () => {
+    if (!selectedCourt) return;
+    setIsProcessingPayment(true);
+    
     try {
+        // 1. Save state to localStorage so we can retrieve it after redirect
+        localStorage.setItem('tempBooking', JSON.stringify(details));
+
+        // 2. Request Payment URL from Backend
         const payload = {
-            courtId: details.courtId,
-            date: getFormattedDateValue(details.date),
-            selectedSlots: details.selectedSlots,
+            action: 'initiatePayment',
+            courtName: selectedCourt.name,
+            dateStr: getFormattedDateValue(details.date),
+            totalPrice: details.totalPrice,
             userName: details.userName,
             userEmail: details.userEmail,
-            userPhone: details.userPhone,
-            totalPrice: details.totalPrice
+            userPhone: details.userPhone
         };
 
-        const res = await fetch('/api/bookings', {
+        const res = await fetch(GOOGLE_SCRIPT_URL, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { "Content-Type": "text/plain;charset=utf-8" },
             body: JSON.stringify(payload)
         });
 
-        if (!res.ok) throw new Error("Booking failed");
+        const data = await res.json();
 
-        setDetails(prev => ({ ...prev, bookingExpiry: null })); // Stop timer
+        if (data.status === 'success' && data.paymentUrl) {
+            // 3. Redirect to ToyyibPay
+            window.location.href = data.paymentUrl;
+        } else {
+            throw new Error(data.message || 'Gagal mendapatkan link pembayaran.');
+        }
+
+    } catch (e: any) {
+        console.error("Payment Init Error:", e);
+        showToast("Ralat menghubungkan ke ToyyibPay. Sila cuba lagi.", "error");
+        setIsProcessingPayment(false);
+    }
+  };
+
+  const saveBookingToSheet = async (bookingData: BookingDetails, billCode?: string) => {
+    setIsProcessingPayment(true); // Ensure loading state is shown
+    try {
+        const payload = {
+            action: 'createBooking',
+            courtId: bookingData.courtId,
+            date: getFormattedDateValue(bookingData.date),
+            selectedSlots: bookingData.selectedSlots,
+            userName: bookingData.userName,
+            userEmail: bookingData.userEmail,
+            userPhone: bookingData.userPhone,
+            totalPrice: bookingData.totalPrice,
+            billCode: billCode
+        };
+
+        const res = await fetch(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            headers: { "Content-Type": "text/plain;charset=utf-8" },
+            body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) throw new Error('Network error');
+        
+        // Success
+        setDetails(prev => ({ ...prev, bookingExpiry: null }));
         setStep(BookingStep.SUCCESS);
+        
     } catch (e) {
-        alert("Ralat semasa menyimpan tempahan. Sila hubungi admin.");
-        console.error(e);
+        console.error("Save Error:", e);
+        showToast("Pembayaran berjaya, tetapi data gagal disimpan ke server. Sila simpan resit anda.", "warning");
+        setDetails(prev => ({ ...prev, bookingExpiry: null }));
+        setStep(BookingStep.SUCCESS);
+        setIsOfflineMode(true);
+    } finally {
+        setIsProcessingPayment(false);
     }
   };
 
   const resetBooking = () => {
+    localStorage.removeItem('tempBooking');
     setDetails({
         courtId: null,
         date: new Date(),
@@ -321,35 +463,38 @@ const App: React.FC = () => {
     });
     setStep(BookingStep.SELECT_COURT);
     setTimeLeft(null);
-    // Refresh bookings
     const dateStr = getFormattedDateValue(new Date());
     setBookedSlots(new Set()); 
   };
 
   // --- Main View Logic ---
-
-  if (step === BookingStep.PAYMENT_GATEWAY) {
-    return (
-      <>
-        {timeLeft !== null && (
-            <div className="fixed top-0 left-0 w-full bg-red-600 text-white text-center py-2 z-[60] text-sm font-bold flex justify-center items-center gap-2">
-                <Timer className="w-4 h-4" />
-                Masa Pembayaran: {formatTimeLeft(timeLeft)}
-            </div>
-        )}
-        <ToyyibPaySimulator 
-            amount={details.totalPrice} 
-            onSuccess={handlePaymentSuccess} 
-            onCancel={() => setStep(BookingStep.SUMMARY)} 
-        />
-      </>
-    );
+  
+  // Loading Screen for Payment Processing
+  if (isProcessingPayment) {
+      return (
+        <div className="fixed inset-0 z-50 bg-white flex flex-col items-center justify-center p-6 text-center">
+            <Loader2 className="w-16 h-16 text-emerald-600 animate-spin mb-6" />
+            <h2 className="text-xl font-bold text-gray-800 mb-2">Sedang Memproses...</h2>
+            <p className="text-gray-500">Sila tunggu sebentar. Jangan tutup tetingkap ini.</p>
+        </div>
+      );
   }
 
   if (step === BookingStep.SUCCESS) {
       return (
-          <div className="min-h-screen bg-white flex flex-col items-center justify-center p-8 text-center">
-              <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mb-6">
+          <div className="min-h-screen bg-white flex flex-col items-center justify-center p-8 text-center relative">
+              {/* Toast for success case if error happened during save */}
+              {toast && (
+                <div className={`
+                    absolute top-6 left-1/2 transform -translate-x-1/2 w-[90%] max-w-sm p-4 rounded-xl shadow-2xl flex items-center gap-3 z-[100] animate-fade-in-down
+                    ${toast.type === 'error' ? 'bg-red-500 text-white' : toast.type === 'warning' ? 'bg-orange-500 text-white' : 'bg-emerald-600 text-white'}
+                `}>
+                    {toast.type === 'error' ? <AlertCircle className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
+                    <span className="text-sm font-semibold text-left">{toast.message}</span>
+                </div>
+              )}
+
+              <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mb-6 animate-bounce-slow">
                 <CheckCircle className="w-10 h-10 text-emerald-600" />
               </div>
               <h1 className="text-2xl font-bold text-gray-800 mb-2">Tempahan Berjaya!</h1>
@@ -358,9 +503,9 @@ const App: React.FC = () => {
                 Resit telah dihantar ke <span className="font-semibold">{details.userEmail}</span>.
               </p>
               
-              <div className="bg-gray-50 p-6 rounded-xl w-full max-w-sm mb-8 text-left border border-gray-100">
+              <div className="bg-gray-50 p-6 rounded-xl w-full max-w-sm mb-6 text-left border border-gray-100">
                   <p className="text-xs text-gray-400 mb-1">ID Tempahan</p>
-                  <p className="font-mono font-bold text-gray-800 mb-4">#INV-{Math.floor(Math.random() * 100000)}</p>
+                  <p className="font-mono font-bold text-gray-800 mb-4">#TOYYIB-{Math.floor(Math.random() * 10000)}</p>
                   
                   <p className="text-xs text-gray-400 mb-1">Court</p>
                   <p className="font-semibold text-gray-800 mb-4">{selectedCourt?.name}</p>
@@ -374,6 +519,18 @@ const App: React.FC = () => {
                   </p>
               </div>
 
+              <div className="flex items-center justify-center gap-2 text-gray-400 text-xs mb-8">
+                  <Camera className="w-4 h-4" />
+                  <span>Sila tangkap layar (screenshot) resit ini sebagai rujukan.</span>
+              </div>
+
+              {isOfflineMode && (
+                <div className="mb-8 p-3 bg-yellow-50 text-yellow-700 text-xs rounded-lg border border-yellow-100">
+                    <p className="font-bold">Mod Luar Talian</p>
+                    <p>Tempahan ini disimpan secara tempatan kerana sambungan ke server gagal.</p>
+                </div>
+              )}
+
               <button 
                 onClick={resetBooking}
                 className="w-full max-w-xs bg-emerald-600 text-white py-3 rounded-xl font-bold shadow-lg hover:bg-emerald-700 transition"
@@ -386,13 +543,35 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen pb-20 max-w-md mx-auto bg-gray-50 shadow-2xl relative overflow-hidden">
-        
+      
+      {/* Toast Notification Container */}
+      {toast && (
+        <div className={`
+            fixed top-6 left-1/2 transform -translate-x-1/2 w-[90%] max-w-sm p-4 rounded-xl shadow-2xl flex items-center gap-3 z-[100] animate-fade-in-down transition-all
+            ${toast.type === 'error' ? 'bg-red-500 text-white' : toast.type === 'warning' ? 'bg-orange-500 text-white' : 'bg-emerald-600 text-white'}
+        `}>
+            {toast.type === 'error' && <AlertCircle className="w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'warning' && <AlertTriangle className="w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'success' && <CheckCircle className="w-5 h-5 flex-shrink-0" />}
+            <span className="text-sm font-semibold flex-1">{toast.message}</span>
+            <button onClick={() => setToast(null)}><X className="w-4 h-4 opacity-70" /></button>
+        </div>
+      )}
+
       {/* Header */}
       <header className="bg-emerald-600 text-white p-6 pb-12 rounded-b-[2rem] shadow-lg relative z-10">
         <div className="flex justify-between items-center mb-6">
             <h1 className="text-2xl font-bold tracking-tight">CourtMas 🏸</h1>
-            <div className="w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center">
-                <User className="w-5 h-5" />
+            <div className="flex items-center gap-3">
+                {isOfflineMode && (
+                    <div className="bg-yellow-500/20 px-2 py-1 rounded-full flex items-center gap-1" title="Offline Mode">
+                        <WifiOff className="w-3 h-3 text-yellow-200" />
+                        <span className="text-[10px] font-bold text-yellow-100">Offline</span>
+                    </div>
+                )}
+                <div className="w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center">
+                    <User className="w-5 h-5" />
+                </div>
             </div>
         </div>
         
@@ -443,7 +622,7 @@ const App: React.FC = () => {
                         key={sport}
                         onClick={() => {
                             setSelectedSport(sport);
-                            setDetails(prev => ({ ...prev, courtId: null })); // Reset court selection on sport change
+                            setDetails(prev => ({ ...prev, courtId: null })); 
                         }}
                         className={`
                             flex-1 py-2 text-sm font-bold rounded-lg transition-all
@@ -465,7 +644,7 @@ const App: React.FC = () => {
             {loading ? (
                  <div className="text-center py-10">
                     <div className="animate-spin w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full mx-auto mb-2"></div>
-                    <p className="text-gray-400 text-sm">Memuat turun data...</p>
+                    <p className="text-gray-400 text-sm">Menghubungi Google Sheets...</p>
                  </div>
             ) : filteredCourts.length === 0 ? (
                 <div className="text-center py-10 bg-white rounded-xl border border-dashed border-gray-300">
@@ -490,7 +669,7 @@ const App: React.FC = () => {
         {step === BookingStep.SELECT_DATE_TIME && (
           <div className="space-y-8 animate-fade-in-up">
             
-            {/* Date Selection - Robust UI without CSS Hacks */}
+            {/* Date Selection */}
             <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
                 <div className="flex justify-between items-center mb-4">
                     <h2 className="font-bold text-gray-800 text-lg flex items-center gap-2">
@@ -498,7 +677,6 @@ const App: React.FC = () => {
                         Pilih Tarikh
                     </h2>
 
-                    {/* Hidden Input controlled by button */}
                     <div className="relative">
                          <input
                             ref={dateInputRef}
@@ -506,7 +684,7 @@ const App: React.FC = () => {
                             min={getFormattedDateValue(new Date())}
                             value={getFormattedDateValue(details.date)}
                             onChange={handleDateChange}
-                            className="absolute opacity-0 w-1 h-1 -z-10" // Hidden visually but accessible to showPicker
+                            className="absolute opacity-0 w-1 h-1 -z-10" 
                         />
                         <button 
                             onClick={handleOpenPicker}
@@ -532,7 +710,7 @@ const App: React.FC = () => {
                     </span>
                 </div>
 
-                {/* Quick Date Strip (Horizontal Scroll) */}
+                {/* Quick Date Strip */}
                 <div className="relative">
                     <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
                         {next14Days.map((d, i) => {
@@ -558,18 +736,16 @@ const App: React.FC = () => {
                             )
                         })}
                     </div>
-                     {/* Fade effect on right to indicate scrolling */}
                     <div className="absolute top-0 right-0 h-full w-8 bg-gradient-to-l from-white to-transparent pointer-events-none"></div>
                 </div>
             </div>
 
-            {/* Duration Selector - Grid Design */}
+            {/* Duration Selector */}
             <div>
                 <h2 className="font-bold text-gray-800 text-lg mb-3 flex items-center gap-2">
                     <Hourglass className="w-5 h-5 text-emerald-600" />
                     Tempoh Main
                 </h2>
-                {/* Fixed Grid for Durations - Cleaner and easier to tap */}
                 <div className="grid grid-cols-4 gap-2 sm:gap-3">
                     {Array.from({ length: 4 }, (_, i) => i + 1).map(h => (
                         <button
@@ -619,7 +795,6 @@ const App: React.FC = () => {
                     {availableSlots.map(slot => {
                         const isSelected = details.selectedSlots.includes(slot.id);
                         
-                        // Check availability for block booking visual logic
                         let isBlockAvailable = true;
                         if (!slot.isBooked) {
                              for (let i = 0; i < details.duration; i++) {
@@ -682,7 +857,6 @@ const App: React.FC = () => {
         {step === BookingStep.SUMMARY && (
           <div className="space-y-6 animate-fade-in-up">
             
-            {/* User Details Form */}
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                 <h2 className="font-bold text-xl text-gray-800 mb-4">Maklumat Penyewa</h2>
                 <div className="space-y-3">
@@ -822,8 +996,17 @@ const App: React.FC = () => {
                     }
                 `}
             >
-                {step === BookingStep.SUMMARY ? 'Bayar Sekarang' : 'Seterusnya'}
-                {step !== BookingStep.SUMMARY && <ChevronRight className="w-5 h-5" />}
+                {step === BookingStep.SUMMARY ? (
+                    <div className="flex items-center gap-2">
+                        <span>Bayar Online (FPX)</span>
+                        <CreditCard className="w-4 h-4" />
+                    </div>
+                ) : (
+                    <>
+                        <span>Seterusnya</span>
+                        <ChevronRight className="w-5 h-5" />
+                    </>
+                )}
             </button>
         </div>
       </footer>
