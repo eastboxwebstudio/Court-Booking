@@ -1,21 +1,26 @@
 /**
  * GOOGLE APPS SCRIPT - COURTMAS BACKEND (PRODUCTION)
  * 
- * !!! PENTING: FIX UNTUK ERROR "You do not have permission to call UrlFetchApp.fetch" !!!
+ * !!! PENTING: ARAHAN DEPLOYMENT YANG SANGAT KRITIKAL !!!
  * 
- * ARAHAN:
  * 1. Copy kod ini ke dalam Google Apps Script.
  * 2. Save.
- * 3. Di bahagian toolbar atas, pilih function "authorizeScript" (dropdown menu sebelah butang Debug/Run).
- * 4. Klik "Run".
- * 5. Google akan minta izin ("Review Permissions").
- *    - Klik "Review Permissions".
- *    - Pilih akaun Google anda.
- *    - Klik "Advanced" (di kiri bawah dialog).
- *    - Klik "Go to ... (unsafe)".
- *    - Klik "Allow".
- * 6. SELEPAS BERJAYA RUN, ANDA WAJIB DEPLOY SEMULA:
- *    - Klik "Deploy" > "Manage Deployments" > ikon Pensil (Edit) > Version: "New Version" > "Deploy".
+ * 3. Pilih function "authorizeScript" dari toolbar dan klik "Run".
+ *    - Berikan kebenaran (Review Permissions -> Allow).
+ * 
+ * 4. *** LANGKAH PALING PENTING (DEPLOYMENT) ***
+ *    - Klik "Deploy" > "Manage Deployments".
+ *    - Klik ikon Pensil (Edit) pada deployment yang aktif.
+ *    - Pastikan setting berikut ADALAH TEPAT (JANGAN SALAH):
+ *      
+ *      -> Execute as: "Me" (email anda)
+ *         (JANGAN PILIH 'User accessing the web app' - INI PUNCA ERROR UTAMA!)
+ * 
+ *      -> Who has access: "Anyone"
+ *         (Supaya public boleh akses tanpa login Google)
+ * 
+ *    - Pada bahagian Version, pilih "New version".
+ *    - Klik "Deploy".
  */
 
 // --- KONFIGURASI TOYYIBPAY ---
@@ -81,7 +86,7 @@ function authorizeScript() {
   try {
     UrlFetchApp.fetch("https://www.google.com");
     console.log("BERJAYA! Skrip kini mempunyai kebenaran UrlFetchApp.");
-    console.log("PENTING: Sila klik DEPLOY > MANAGE DEPLOYMENTS > EDIT > NEW VERSION > DEPLOY untuk kemaskini live app.");
+    console.log("PENTING: Pastikan DEPLOYMENT disetkan kepada 'Execute as: Me' dan 'Who has access: Anyone'.");
   } catch (e) {
     console.log("RALAT: " + e.toString());
   }

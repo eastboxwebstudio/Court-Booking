@@ -25,7 +25,10 @@ import {
   CreditCard,
   Camera,
   Share2,
-  ExternalLink
+  ExternalLink,
+  Settings,
+  HelpCircle,
+  FileText
 } from 'lucide-react';
 
 // --- CONFIGURATION ---
@@ -57,10 +60,12 @@ const App: React.FC = () => {
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [configError, setConfigError] = useState(false);
   const [isOfflineMode, setIsOfflineMode] = useState(false);
+  const [showHelpModal, setShowHelpModal] = useState(false);
   
   // Payment Processing State
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null); // For manual fallback
+  const [agreedToTerms, setAgreedToTerms] = useState(false); // New T&C State
 
   // Toast State
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -375,6 +380,7 @@ const App: React.FC = () => {
   const handleBack = () => {
     if (step === BookingStep.SUMMARY) {
         setDetails(prev => ({ ...prev, bookingExpiry: null }));
+        setAgreedToTerms(false); // Reset T&C when going back
     }
     if (step > 1) setStep(step - 1);
   };
@@ -399,6 +405,11 @@ const App: React.FC = () => {
 
   const handleInitiatePayment = async () => {
     if (!selectedCourt) return;
+    if (!agreedToTerms) {
+        showToast("Sila setuju dengan Terma & Syarat.", "warning");
+        return;
+    }
+    
     setIsProcessingPayment(true);
     setPaymentUrl(null); // Reset
     
@@ -440,14 +451,16 @@ const App: React.FC = () => {
             setPaymentUrl(data.paymentUrl);
             
             // 5. Redirect to ToyyibPay
-            // We use setTimeout to allow state update and show "Redirecting..." UI
-            // Also provides time for user to click manual link if auto-redirect is blocked
             setTimeout(() => {
                 window.location.href = data.paymentUrl;
             }, 1000); 
 
+        } else if (data.message && (data.message.includes("PERMISSION") || data.message.includes("permission"))) {
+            // Specific Handler for GAS Permissions
+            setIsProcessingPayment(false);
+            setShowHelpModal(true);
         } else {
-            // Throw specific error from backend (e.g. "Category Code Not Found" or "PERMISSION ERROR")
+            // Throw specific error from backend
             throw new Error(data.message || 'Gagal mendapatkan link pembayaran.');
         }
 
@@ -458,7 +471,9 @@ const App: React.FC = () => {
         
         // Detect permission error from GAS and suggest Redeploy
         if (msg.includes("permission") || msg.includes("UrlFetchApp") || msg.includes("PERMISSION ERROR")) {
-             msg = "Ralat: Anda mungkin terlupa tekan 'Deploy New Version' di Google Apps Script selepas memberi izin.";
+             setIsProcessingPayment(false);
+             setShowHelpModal(true);
+             return;
         }
 
         showToast(msg, "error");
@@ -518,6 +533,7 @@ const App: React.FC = () => {
         bookingExpiry: null
     });
     setStep(BookingStep.SELECT_COURT);
+    setAgreedToTerms(false);
     setTimeLeft(null);
     const dateStr = getFormattedDateValue(new Date());
     setBookedSlots(new Set()); 
@@ -525,6 +541,47 @@ const App: React.FC = () => {
 
   // --- Main View Logic ---
   
+  // Troubleshooting Modal
+  if (showHelpModal) {
+    return (
+        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl relative">
+                <div className="flex items-center gap-3 mb-4 text-red-600">
+                    <Settings className="w-8 h-8" />
+                    <h2 className="text-xl font-bold">Ralat Konfigurasi Server</h2>
+                </div>
+                
+                <p className="text-gray-600 mb-4 text-sm">
+                    Google Apps Script menghalang sambungan ke ToyyibPay kerana tetapan Deployment yang salah.
+                </p>
+
+                <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6 text-sm">
+                    <p className="font-bold mb-2">Sila betulkan tetapan ini di Google Apps Script:</p>
+                    <ol className="list-decimal list-inside space-y-2 text-gray-700">
+                        <li>Buka <strong>Google Apps Script</strong>.</li>
+                        <li>Klik <strong>Deploy</strong> {'>'} <strong>Manage Deployments</strong>.</li>
+                        <li>Klik ikon <strong>Pensil (Edit)</strong>.</li>
+                        <li>
+                            <span className="text-red-600 font-bold">PENTING:</span> Tukar <strong>Execute as</strong> kepada <strong>"Me"</strong> (Email anda).
+                            <br/><span className="text-xs text-gray-500 ml-5">(Jangan guna 'User accessing the web app')</span>
+                        </li>
+                        <li>Pastikan <strong>Who has access</strong> ialah <strong>"Anyone"</strong>.</li>
+                        <li>Pada bahagian Version, pilih <strong>New version</strong>.</li>
+                        <li>Klik <strong>Deploy</strong>.</li>
+                    </ol>
+                </div>
+
+                <button 
+                    onClick={() => setShowHelpModal(false)}
+                    className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 transition"
+                >
+                    Saya Sudah Betulkan
+                </button>
+            </div>
+        </div>
+    );
+  }
+
   // Loading Screen for Payment Processing
   if (isProcessingPayment) {
       return (
@@ -1036,10 +1093,26 @@ const App: React.FC = () => {
                     <span className="text-gray-600">Jumlah jam</span>
                     <span className="font-medium">x {details.duration}</span>
                 </div>
-                <div className="flex justify-between items-center text-lg">
+                <div className="flex justify-between items-center text-lg pb-4 border-b border-gray-100 mb-4">
                     <span className="font-bold text-gray-800">Jumlah Besar</span>
                     <span className="font-extrabold text-emerald-600 text-2xl">RM {details.totalPrice.toFixed(2)}</span>
                 </div>
+
+                {/* Terms & Conditions Checkbox */}
+                <div 
+                    onClick={() => setAgreedToTerms(!agreedToTerms)}
+                    className="flex items-start gap-3 cursor-pointer p-2 -ml-2 rounded-lg hover:bg-gray-50 transition"
+                >
+                    <div className={`mt-0.5 w-5 h-5 rounded border flex items-center justify-center transition-colors ${agreedToTerms ? 'bg-emerald-600 border-emerald-600' : 'border-gray-300 bg-white'}`}>
+                        {agreedToTerms && <CheckCircle className="w-3.5 h-3.5 text-white" />}
+                    </div>
+                    <div className="flex-1">
+                        <p className="text-sm text-gray-600 leading-snug select-none">
+                            Saya bersetuju dengan <span className="font-bold text-gray-800">peraturan gelanggang</span> dan memahami bahawa bayaran <span className="text-red-500 font-bold">tidak akan dikembalikan</span> jika saya membatalkan tempahan.
+                        </p>
+                    </div>
+                </div>
+
             </div>
 
             <div className="flex items-center gap-2 p-3 bg-yellow-50 text-yellow-800 text-sm rounded-lg border border-yellow-100">
@@ -1067,14 +1140,14 @@ const App: React.FC = () => {
                 disabled={
                     (step === BookingStep.SELECT_COURT && !details.courtId) ||
                     (step === BookingStep.SELECT_DATE_TIME && details.selectedSlots.length === 0) ||
-                    (step === BookingStep.SUMMARY && (!details.userName || !details.userEmail || !details.userPhone))
+                    (step === BookingStep.SUMMARY && (!details.userName || !details.userEmail || !details.userPhone || !agreedToTerms))
                 }
                 className={`
                     flex-1 py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 transition-all
                     ${
                         ((step === BookingStep.SELECT_COURT && !details.courtId) || 
                          (step === BookingStep.SELECT_DATE_TIME && details.selectedSlots.length === 0) ||
-                         (step === BookingStep.SUMMARY && (!details.userName || !details.userEmail || !details.userPhone))
+                         (step === BookingStep.SUMMARY && (!details.userName || !details.userEmail || !details.userPhone || !agreedToTerms))
                         )
                         ? 'bg-gray-300 cursor-not-allowed'
                         : 'bg-emerald-600 hover:bg-emerald-700 shadow-md hover:shadow-lg active:scale-95'
