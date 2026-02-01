@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { BookingDetails, BookingStep, Court, TimeSlot, AppView, BookingRecord } from './types';
 import CourtCard from './components/CourtCard';
-import ChatBot from './components/ChatBot';
 import { 
   Calendar, 
   Clock, 
@@ -1462,8 +1461,6 @@ const App: React.FC = () => {
             </div>
         </div>
       </footer>
-
-      <ChatBot />
     </div>
   );
 };
