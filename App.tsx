@@ -44,7 +44,6 @@ const DEFAULT_GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxT68
 const START_HOUR = 8; // 8 AM
 const END_HOUR = 23; // 11 PM
 const BOOKING_TIMEOUT_MS = 15 * 60 * 1000; // 15 Minutes
-const ADMIN_PIN = "1234"; // Simple PIN for demo
 
 // --- MOCK DATA (Fallback) ---
 const MOCK_COURTS: Court[] = [
@@ -67,6 +66,7 @@ const App: React.FC = () => {
   // App View State
   const [currentView, setCurrentView] = useState<AppView>(AppView.USER);
   const [adminPin, setAdminPin] = useState("");
+  const [isVerifyingPin, setIsVerifyingPin] = useState(false); // Loading state for login
 
   const [step, setStep] = useState<BookingStep>(BookingStep.SELECT_COURT);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
@@ -318,12 +318,42 @@ const App: React.FC = () => {
       showToast("URL Server dikemaskini.", "success");
   };
 
-  const handleAdminLogin = () => {
-      if (adminPin === ADMIN_PIN) {
-          setCurrentView(AppView.ADMIN_DASHBOARD);
-          setAdminPin("");
-      } else {
-          showToast("PIN Salah!", "error");
+  // --- SECURE ADMIN LOGIN ---
+  const handleAdminLogin = async () => {
+      if (!adminPin) {
+          showToast("Sila masukkan PIN", "warning");
+          return;
+      }
+
+      setIsVerifyingPin(true);
+
+      try {
+          // Verify PIN securely with Backend
+          const res = await fetch(scriptUrl, {
+              method: 'POST',
+              headers: { "Content-Type": "text/plain;charset=utf-8" },
+              body: JSON.stringify({
+                  action: 'verifyAdmin',
+                  pin: adminPin
+              })
+          });
+
+          if (!res.ok) throw new Error("Ralat sambungan");
+
+          const data = await res.json();
+          
+          if (data.status === 'success') {
+              setCurrentView(AppView.ADMIN_DASHBOARD);
+              showToast("Selamat datang Admin!", "success");
+          } else {
+              showToast("PIN Salah!", "error");
+          }
+      } catch (e) {
+          console.error(e);
+          // Fallback if server unreachable/offline logic not implemented for auth
+          showToast("Gagal menyemak PIN. Pastikan internet ada.", "error");
+      } finally {
+          setIsVerifyingPin(false);
           setAdminPin("");
       }
   };
@@ -678,16 +708,19 @@ const App: React.FC = () => {
                       type="password"
                       value={adminPin}
                       onChange={(e) => setAdminPin(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleAdminLogin()}
                       placeholder="Masukkan PIN"
                       className="w-full text-center text-2xl tracking-widest p-3 bg-gray-100 rounded-xl border border-gray-300 mb-6 focus:ring-2 focus:ring-emerald-500 outline-none"
-                      maxLength={4}
+                      maxLength={6}
                   />
 
                   <button 
                       onClick={handleAdminLogin}
-                      className="w-full bg-gray-900 text-white py-3 rounded-xl font-bold mb-3 hover:bg-gray-800"
+                      disabled={isVerifyingPin}
+                      className="w-full bg-gray-900 text-white py-3 rounded-xl font-bold mb-3 hover:bg-gray-800 disabled:opacity-50 flex justify-center items-center gap-2"
                   >
-                      Masuk
+                      {isVerifyingPin && <Loader2 className="w-4 h-4 animate-spin" />}
+                      {isVerifyingPin ? "Menyemak..." : "Masuk"}
                   </button>
                   <button 
                       onClick={() => setCurrentView(AppView.USER)}

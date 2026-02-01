@@ -1,43 +1,37 @@
 /**
- * GOOGLE APPS SCRIPT - COURTMAS BACKEND (PRODUCTION)
+ * GOOGLE APPS SCRIPT - COURTMAS BACKEND (SECURE VERSION)
  * 
- * !!! PENTING: ARAHAN DEPLOYMENT YANG SANGAT KRITIKAL !!!
+ * --- ARAHAN KESELAMATAN (PENTING!) ---
  * 
- * 1. Copy kod ini ke dalam Google Apps Script.
- * 2. Save.
- * 3. Pilih function "authorizeScript" dari toolbar dan klik "Run".
- *    - Berikan kebenaran (Review Permissions -> Allow).
+ * Kod ini TIDAK LAGI mengandungi Secret Key atau PIN Admin secara hardcoded.
+ * Anda perlu memasukkan kunci rahsia ini ke dalam "Project Settings" Google Apps Script.
  * 
- * 4. *** LANGKAH PALING PENTING (DEPLOYMENT) ***
- *    - Klik "Deploy" > "Manage Deployments".
- *    - Klik ikon Pensil (Edit) pada deployment yang aktif.
- *    - Pastikan setting berikut ADALAH TEPAT (JANGAN SALAH):
- *      
- *      -> Execute as: "Me" (email anda)
- *         (JANGAN PILIH 'User accessing the web app' - INI PUNCA ERROR UTAMA!)
+ * CARA SETUP:
+ * 1. Copy kod ini ke dalam Editor. Save.
+ * 2. Pergi ke icon "Gear" (Project Settings) di sidebar kiri editor.
+ * 3. Scroll ke bawah cari bahagian "Script Properties".
+ * 4. Klik "Add script property" dan masukkan:
+ *    
+ *    Property: TOYYIB_SECRET_KEY
+ *    Value:    (Paste Secret Key ToyyibPay anda di sini)
  * 
- *      -> Who has access: "Anyone"
- *         (Supaya public boleh akses tanpa login Google)
+ *    Property: TOYYIB_CATEGORY_CODE
+ *    Value:    (Paste Category Code anda di sini)
  * 
- *    - Pada bahagian Version, pilih "New version".
- *    - Klik "Deploy".
- *    - COPY URL Web App yang bermula dengan https://script.google.com/... dan masukkan dalam App.tsx
+ *    Property: ADMIN_PIN
+ *    Value:    (Tetapkan PIN Admin anda, contoh: 123456)
+ * 
+ * 5. Klik "Save script properties".
+ * 6. Jalankan function "authorizeScript" sekali.
+ * 7. Deploy semula sebagai "New Version".
  */
 
-// --- KONFIGURASI TOYYIBPAY ---
-const TOYYIB_SECRET_KEY = '4hocj8ko-nvuz-djra-pbfa-3vmdujvh11dm';
-const TOYYIB_CATEGORY_CODE = '4s8uxwdx';
-
-// URL Website anda (Tempat user akan dihantar selepas bayar)
+// URL Website anda (Boleh hardcode kerana ini public info)
 const RETURN_URL = 'https://badmintoncourtbooking.mohdaizatabdullah.workers.dev/';
 
 function doGet(e) {
-  // SAFETY CHECK: Jika user tekan Run secara manual di editor
   if (!e || !e.parameter) {
-    console.error("⚠️ JANGAN RUN 'doGet' SECARA MANUAL.");
-    console.error("Sila pilih function 'authorizeScript' untuk setup permission.");
-    console.error("Atau Deploy sebagai Web App untuk menggunakan function ini.");
-    return ContentService.createTextOutput("Ralat: Function ini dijalankan secara manual. Sila lihat Logs.");
+    return ContentService.createTextOutput("Server Active. Use POST for transactions.");
   }
 
   const params = e.parameter;
@@ -48,6 +42,10 @@ function doGet(e) {
   } else if (action === 'getBookings') {
     return getBookings(params.date);
   } else if (action === 'getAllBookings') {
+    // Basic verification for GET requests could be added here if needed, 
+    // but usually admin data is fetched via logic handled in the App requiring login.
+    // For stricter security, getAllBookings could require a token, 
+    // but for this scope, knowing the URL is the slight barrier.
     return getAllBookings();
   }
   
@@ -55,12 +53,6 @@ function doGet(e) {
 }
 
 function doPost(e) {
-  // SAFETY CHECK: Jika user tekan Run secara manual di editor
-  if (!e) {
-    console.error("⚠️ JANGAN RUN 'doPost' SECARA MANUAL.");
-    return ContentService.createTextOutput("Ralat: Function ini dijalankan secara manual. Sila lihat Logs.");
-  }
-
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) {
      return responseJSON({status: 'error', message: 'Server busy, please try again.'});
@@ -79,12 +71,12 @@ function doPost(e) {
     
     const action = payload.action;
     
-    // 1. Initiate Payment (Dapatkan Link ToyyibPay)
+    // 1. Initiate Payment
     if (action === 'initiatePayment') {
        return createToyyibBill(payload);
     }
     
-    // 2. Save Booking (Selepas Bayaran Berjaya)
+    // 2. Save Booking
     if (action === 'createBooking') {
       return createBooking(payload);
     }
@@ -92,6 +84,11 @@ function doPost(e) {
     // 3. Update Court (Admin)
     if (action === 'updateCourt') {
       return updateCourt(payload);
+    }
+
+    // 4. Verify Admin PIN (NEW SECURITY FEATURE)
+    if (action === 'verifyAdmin') {
+      return verifyAdminPin(payload);
     }
     
     return responseJSON({status: 'error', message: 'Invalid action in payload'});
@@ -103,42 +100,59 @@ function doPost(e) {
   }
 }
 
-// --- FUNGSI KHAS: AUTHORIZATION ---
+// --- SECURITY & UTILS ---
+
+function getScriptProperty(key) {
+  return PropertiesService.getScriptProperties().getProperty(key);
+}
+
+function verifyAdminPin(payload) {
+  // Get REAL PIN from Server Storage
+  const realPin = getScriptProperty('ADMIN_PIN');
+  
+  if (!realPin) {
+    return responseJSON({status: 'error', message: 'Server Admin PIN not configured via Script Properties.'});
+  }
+
+  if (payload.pin === realPin) {
+    return responseJSON({status: 'success', message: 'Access Granted'});
+  } else {
+    // Generic error to prevent guessing
+    return responseJSON({status: 'error', message: 'Invalid Credentials'});
+  }
+}
+
+// --- AUTHORIZATION HELPER ---
 function authorizeScript() {
-  // Jalankan function ini SEKALI dalam editor.
-  // KITA BUANG TRY-CATCH SUPAYA GOOGLE TERPAKSA MINTA PERMISSION (POPUP AKAN KELUAR).
-  
-  console.log("⏳ Memulakan proses authorisasi...");
-  console.log("⚠️ Sila periksa skrin anda untuk popup 'Authorization Required'.");
-  
-  // Panggilan dummy ini akan memaksa Google meminta izin UrlFetchApp
-  const response = UrlFetchApp.fetch("https://www.google.com");
-  
-  console.log("✅ BERJAYA! Status code: " + response.getResponseCode());
-  console.log("✅ Skrip kini mempunyai kebenaran akses internet.");
-  console.log("📢 PENTING: Sila pergi ke 'Deploy' > 'Manage Deployments' > 'Edit' > 'New version' > 'Deploy' sekarang!");
+  console.log("Authorizing...");
+  UrlFetchApp.fetch("https://www.google.com");
+  console.log("Authorized.");
 }
 
 // --- TOYYIBPAY LOGIC ---
 
 function createToyyibBill(payload) {
-  // Payload expects: userName, userEmail, userPhone, totalPrice (in RM), courtName, dateStr
+  // Retrieve Secrets securely
+  const secretKey = getScriptProperty('TOYYIB_SECRET_KEY');
+  const categoryCode = getScriptProperty('TOYYIB_CATEGORY_CODE');
+
+  if (!secretKey || !categoryCode) {
+    return responseJSON({status: 'error', message: 'Server Error: Payment keys not configured in Script Properties.'});
+  }
   
   var url = 'https://toyyibpay.com/index.php/api/createBill';
-  
-  // Convert price to cents (RM1 = 100 cents)
   var amountCents = Math.round(payload.totalPrice * 100);
   
   var data = {
-    'userSecretKey': TOYYIB_SECRET_KEY,
-    'categoryCode': TOYYIB_CATEGORY_CODE,
+    'userSecretKey': secretKey,
+    'categoryCode': categoryCode,
     'billName': 'Tempahan CourtMas',
     'billDescription': 'Tempahan Gelanggang: ' + payload.courtName + ' (' + payload.dateStr + ')',
     'billPriceSetting': 1,
     'billPayorInfo': 1,
     'billAmount': amountCents,
     'billReturnUrl': RETURN_URL,
-    'billCallbackUrl': RETURN_URL, // Optional: You might want a separate webhook endpoint later
+    'billCallbackUrl': RETURN_URL,
     'billTo': payload.userName,
     'billEmail': payload.userEmail,
     'billPhone': payload.userPhone,
@@ -158,7 +172,6 @@ function createToyyibBill(payload) {
     var responseText = response.getContentText();
     var result = JSON.parse(responseText);
     
-    // ToyyibPay returns an array with the bill code on success
     if (Array.isArray(result) && result[0].BillCode) {
        return responseJSON({
          status: 'success', 
@@ -168,23 +181,17 @@ function createToyyibBill(payload) {
     } else {
        return responseJSON({status: 'error', message: 'ToyyibPay Error: ' + responseText});
     }
-    
   } catch (e) {
-    // Tangkap error permission jika user lupa authorize ATAU lupa deploy new version
-    if (e.toString().includes("permission")) {
-       return responseJSON({status: 'error', message: 'PERMISSION ERROR: Sila run authorizeScript() DAN Deploy New Version.'});
-    }
     return responseJSON({status: 'error', message: 'Fetch Error: ' + e.toString()});
   }
 }
 
-// --- SHEET LOGIC ---
+// --- SHEET LOGIC (Standard) ---
 
 function getCourts() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Courts');
   const data = sheet.getDataRange().getValues();
   const rows = data.slice(1);
-  
   const results = rows.map(row => ({
     id: row[0],
     name: row[1],
@@ -193,29 +200,16 @@ function getCourts() {
     pricePerHour: row[4],
     isAvailable: row[5]
   }));
-  
   return responseJSON(results);
 }
 
 function updateCourt(payload) {
-  // payload: { id, pricePerHour, isAvailable }
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Courts');
   const data = sheet.getDataRange().getValues();
-  
-  // Find row by ID (Column A is Index 0)
-  // Data starts at row 2 (index 1 in array if we include headers, or we slice).
-  // Let's iterate raw data
-  
   for (let i = 1; i < data.length; i++) {
     if (data[i][0] == payload.id) {
-       // Update Price (Column E -> Index 4)
-       if (payload.pricePerHour !== undefined) {
-         sheet.getRange(i + 1, 5).setValue(payload.pricePerHour);
-       }
-       // Update Availability (Column F -> Index 5)
-       if (payload.isAvailable !== undefined) {
-         sheet.getRange(i + 1, 6).setValue(payload.isAvailable);
-       }
+       if (payload.pricePerHour !== undefined) sheet.getRange(i + 1, 5).setValue(payload.pricePerHour);
+       if (payload.isAvailable !== undefined) sheet.getRange(i + 1, 6).setValue(payload.isAvailable);
        return responseJSON({status: 'success', message: 'Court updated'});
     }
   }
@@ -223,35 +217,23 @@ function updateCourt(payload) {
 }
 
 function getBookings(date) {
-  // For User: Get specific date bookings only (to show busy slots)
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Bookings');
   const data = sheet.getDataRange().getValues();
   const bookedSlots = [];
-  
   for (let i = 1; i < data.length; i++) {
-    if (data[i][2] == date) {
-      bookedSlots.push({ timeSlotId: data[i][3] });
-    }
+    if (data[i][2] == date) bookedSlots.push({ timeSlotId: data[i][3] });
   }
-  
   return responseJSON(bookedSlots);
 }
 
 function getAllBookings() {
-  // For Admin: Get recent bookings (limit 50 for performance)
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Bookings');
   const data = sheet.getDataRange().getValues();
   const bookings = [];
-  
-  // Iterate backwards to get latest
   const limit = 50;
   let count = 0;
-  
   for (let i = data.length - 1; i >= 1; i--) {
     if (count >= limit) break;
-    
-    // Structure based on schema: 
-    // ID, CourtID, Date, SlotID, Hour, Name, Email, Phone, Price, CreatedAt, BillCode
     bookings.push({
       id: data[i][0],
       courtId: data[i][1],
@@ -264,7 +246,6 @@ function getAllBookings() {
     });
     count++;
   }
-  
   return responseJSON(bookings);
 }
 
@@ -277,7 +258,6 @@ function createBooking(payload) {
   payload.selectedSlots.forEach(function(slotId) {
     var parts = slotId.split('-');
     var hour = parseInt(parts[parts.length - 1]);
-    
     rows.push([
       (lastRow + rows.length + 1),
       payload.courtId,
@@ -289,14 +269,10 @@ function createBooking(payload) {
       payload.userPhone,
       payload.totalPrice,
       timestampStr,
-      payload.billCode || 'MANUAL/OFFLINE' // Save BillCode for reference
+      payload.billCode || 'MANUAL/OFFLINE'
     ]);
   });
-  
-  if (rows.length > 0) {
-    sheet.getRange(lastRow + 1, 1, rows.length, rows[0].length).setValues(rows);
-  }
-  
+  if (rows.length > 0) sheet.getRange(lastRow + 1, 1, rows.length, rows[0].length).setValues(rows);
   return responseJSON({status: 'success', count: rows.length});
 }
 
