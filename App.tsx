@@ -237,10 +237,29 @@ const App: React.FC = () => {
       try {
         const res = await fetch(`${scriptUrl}?action=getAllBookings`);
         if (!res.ok) throw new Error("Network fail");
-        const data = await res.json();
-        setAdminBookings(data);
+        
+        // Safety: Parse text first to catch non-JSON (HTML) responses
+        const text = await res.text();
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (e) {
+             throw new Error("Invalid JSON from server");
+        }
+
+        if (Array.isArray(data)) {
+            setAdminBookings(data);
+        } else {
+            console.error("Expected Array, got:", data);
+            setAdminBookings([]); 
+            if (data.status === 'error') {
+                 showToast(data.message || "Ralat Server", "error");
+            }
+        }
       } catch (e) {
-          showToast("Gagal mengambil data tempahan", "error");
+          console.error(e);
+          showToast("Gagal mengambil data tempahan.", "error");
+          setAdminBookings([]);
       } finally {
           setLoading(false);
       }
@@ -749,28 +768,34 @@ const App: React.FC = () => {
                       ) : adminBookings.length === 0 ? (
                           <div className="text-center py-10 text-gray-400">Tiada tempahan.</div>
                       ) : (
-                          adminBookings.map((b, i) => (
-                              <div key={i} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                                  <div className="flex justify-between items-start mb-2">
-                                      <div>
-                                          <p className="font-bold text-gray-800 text-sm"># {b.id}</p>
-                                          <p className="text-xs text-gray-500">
-                                              {new Date(b.date).toLocaleDateString()} | {b.timeSlotId.split('-').pop()}:00
-                                          </p>
-                                      </div>
-                                      <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${b.billCode && b.billCode !== '-' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                                          {b.billCode && b.billCode !== '-' ? 'PAID' : 'PENDING'}
-                                      </span>
-                                  </div>
-                                  <div className="border-t border-gray-100 pt-2 mt-2 flex justify-between items-end">
-                                      <div>
-                                          <p className="text-sm font-medium text-gray-800">{b.userName}</p>
-                                          <p className="text-xs text-gray-400">{b.userPhone}</p>
-                                      </div>
-                                      <p className="font-bold text-emerald-600">RM {b.totalPrice}</p>
-                                  </div>
-                              </div>
-                          ))
+                          adminBookings.map((b, i) => {
+                              // Safety Check for rendering
+                              const dateStr = b.date ? new Date(b.date).toLocaleDateString() : 'N/A';
+                              const timeStr = b.timeSlotId && typeof b.timeSlotId === 'string' ? b.timeSlotId.split('-').pop() + ':00' : 'N/A';
+                              
+                              return (
+                                <div key={i} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                                    <div className="flex justify-between items-start mb-2">
+                                        <div>
+                                            <p className="font-bold text-gray-800 text-sm"># {b.id}</p>
+                                            <p className="text-xs text-gray-500">
+                                                {dateStr} | {timeStr}
+                                            </p>
+                                        </div>
+                                        <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${b.billCode && b.billCode !== '-' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                                            {b.billCode && b.billCode !== '-' ? 'PAID' : 'PENDING'}
+                                        </span>
+                                    </div>
+                                    <div className="border-t border-gray-100 pt-2 mt-2 flex justify-between items-end">
+                                        <div>
+                                            <p className="text-sm font-medium text-gray-800">{b.userName || 'No Name'}</p>
+                                            <p className="text-xs text-gray-400">{b.userPhone || '-'}</p>
+                                        </div>
+                                        <p className="font-bold text-emerald-600">RM {b.totalPrice}</p>
+                                    </div>
+                                </div>
+                              );
+                          })
                       )}
                   </div>
               )}
