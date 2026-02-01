@@ -34,7 +34,8 @@ import {
   LayoutDashboard,
   List,
   LogOut,
-  Edit2
+  Edit2,
+  Server
 } from 'lucide-react';
 
 // --- CONFIGURATION ---
@@ -67,6 +68,7 @@ const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<AppView>(AppView.USER);
   const [adminPin, setAdminPin] = useState("");
   const [isVerifyingPin, setIsVerifyingPin] = useState(false); // Loading state for login
+  const [showConfigInLogin, setShowConfigInLogin] = useState(false); // Toggle for config in login screen
 
   const [step, setStep] = useState<BookingStep>(BookingStep.SELECT_COURT);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
@@ -313,9 +315,14 @@ const App: React.FC = () => {
   };
 
   const handleSaveSettings = (newUrl: string) => {
+      if (!newUrl) {
+          showToast("URL tidak boleh kosong.", "error");
+          return;
+      }
       setScriptUrl(newUrl);
       localStorage.setItem('courtMasScriptUrl', newUrl);
       showToast("URL Server dikemaskini.", "success");
+      setShowConfigInLogin(false);
   };
 
   // --- SECURE ADMIN LOGIN ---
@@ -346,12 +353,13 @@ const App: React.FC = () => {
               setCurrentView(AppView.ADMIN_DASHBOARD);
               showToast("Selamat datang Admin!", "success");
           } else {
-              showToast("PIN Salah!", "error");
+              // CHANGE HERE: Display server message directly
+              showToast(data.message || "Log Masuk Gagal", "error");
           }
       } catch (e) {
           console.error(e);
           // Fallback if server unreachable/offline logic not implemented for auth
-          showToast("Gagal menyemak PIN. Pastikan internet ada.", "error");
+          showToast("Gagal menyemak PIN. Pastikan URL betul.", "error");
       } finally {
           setIsVerifyingPin(false);
           setAdminPin("");
@@ -698,35 +706,66 @@ const App: React.FC = () => {
   if (currentView === AppView.ADMIN_LOGIN) {
       return (
           <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6">
-              <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center">
+              <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center relative">
+                  
+                  {/* Config Toggle Button (Hidden/Subtle) */}
+                  <button 
+                    onClick={() => setShowConfigInLogin(!showConfigInLogin)}
+                    className="absolute top-4 right-4 text-gray-300 hover:text-gray-500"
+                  >
+                    <Settings className="w-5 h-5" />
+                  </button>
+
                   <div className="w-16 h-16 bg-gray-900 rounded-full flex items-center justify-center mx-auto mb-4">
                       <Lock className="w-8 h-8 text-white" />
                   </div>
                   <h2 className="text-xl font-bold text-gray-800 mb-6">Akses Admin</h2>
                   
-                  <input 
-                      type="password"
-                      value={adminPin}
-                      onChange={(e) => setAdminPin(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleAdminLogin()}
-                      placeholder="Masukkan PIN"
-                      className="w-full text-center text-2xl tracking-widest p-3 bg-gray-100 rounded-xl border border-gray-300 mb-6 focus:ring-2 focus:ring-emerald-500 outline-none"
-                      maxLength={6}
-                  />
+                  {showConfigInLogin ? (
+                    <div className="mb-4 animate-fade-in-up">
+                        <label className="block text-xs font-bold text-gray-500 mb-1 text-left">Google Script URL</label>
+                        <textarea 
+                            value={scriptUrl}
+                            onChange={(e) => setScriptUrl(e.target.value)}
+                            className="w-full text-xs p-2 bg-gray-50 border border-emerald-300 rounded-lg outline-none focus:ring-1 focus:ring-emerald-500 text-gray-700 font-mono mb-2"
+                            rows={3}
+                            placeholder="https://script.google.com/..."
+                        />
+                        <button 
+                            onClick={() => handleSaveSettings(scriptUrl)}
+                            className="w-full bg-emerald-600 text-white py-2 rounded-lg text-xs font-bold mb-4"
+                        >
+                            Simpan URL Baru
+                        </button>
+                    </div>
+                  ) : (
+                    <>
+                        <input 
+                            type="password"
+                            value={adminPin}
+                            onChange={(e) => setAdminPin(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleAdminLogin()}
+                            placeholder="Masukkan PIN"
+                            className="w-full text-center text-2xl tracking-widest p-3 bg-gray-100 rounded-xl border border-gray-300 mb-6 focus:ring-2 focus:ring-emerald-500 outline-none"
+                            maxLength={6}
+                        />
 
-                  <button 
-                      onClick={handleAdminLogin}
-                      disabled={isVerifyingPin}
-                      className="w-full bg-gray-900 text-white py-3 rounded-xl font-bold mb-3 hover:bg-gray-800 disabled:opacity-50 flex justify-center items-center gap-2"
-                  >
-                      {isVerifyingPin && <Loader2 className="w-4 h-4 animate-spin" />}
-                      {isVerifyingPin ? "Menyemak..." : "Masuk"}
-                  </button>
+                        <button 
+                            onClick={handleAdminLogin}
+                            disabled={isVerifyingPin}
+                            className="w-full bg-gray-900 text-white py-3 rounded-xl font-bold mb-3 hover:bg-gray-800 disabled:opacity-50 flex justify-center items-center gap-2"
+                        >
+                            {isVerifyingPin && <Loader2 className="w-4 h-4 animate-spin" />}
+                            {isVerifyingPin ? "Menyemak..." : "Masuk"}
+                        </button>
+                    </>
+                  )}
+
                   <button 
                       onClick={() => setCurrentView(AppView.USER)}
                       className="text-sm text-gray-500 hover:text-gray-700"
                   >
-                      Batal
+                      Kembali ke Utama
                   </button>
               </div>
           </div>
