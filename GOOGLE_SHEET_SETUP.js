@@ -47,6 +47,8 @@ function doGet(e) {
     return getCourts();
   } else if (action === 'getBookings') {
     return getBookings(params.date);
+  } else if (action === 'getAllBookings') {
+    return getAllBookings();
   }
   
   return responseJSON({error: 'Invalid action'});
@@ -85,6 +87,11 @@ function doPost(e) {
     // 2. Save Booking (Selepas Bayaran Berjaya)
     if (action === 'createBooking') {
       return createBooking(payload);
+    }
+    
+    // 3. Update Court (Admin)
+    if (action === 'updateCourt') {
+      return updateCourt(payload);
     }
     
     return responseJSON({status: 'error', message: 'Invalid action in payload'});
@@ -190,7 +197,33 @@ function getCourts() {
   return responseJSON(results);
 }
 
+function updateCourt(payload) {
+  // payload: { id, pricePerHour, isAvailable }
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Courts');
+  const data = sheet.getDataRange().getValues();
+  
+  // Find row by ID (Column A is Index 0)
+  // Data starts at row 2 (index 1 in array if we include headers, or we slice).
+  // Let's iterate raw data
+  
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] == payload.id) {
+       // Update Price (Column E -> Index 4)
+       if (payload.pricePerHour !== undefined) {
+         sheet.getRange(i + 1, 5).setValue(payload.pricePerHour);
+       }
+       // Update Availability (Column F -> Index 5)
+       if (payload.isAvailable !== undefined) {
+         sheet.getRange(i + 1, 6).setValue(payload.isAvailable);
+       }
+       return responseJSON({status: 'success', message: 'Court updated'});
+    }
+  }
+  return responseJSON({status: 'error', message: 'Court ID not found'});
+}
+
 function getBookings(date) {
+  // For User: Get specific date bookings only (to show busy slots)
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Bookings');
   const data = sheet.getDataRange().getValues();
   const bookedSlots = [];
@@ -202,6 +235,37 @@ function getBookings(date) {
   }
   
   return responseJSON(bookedSlots);
+}
+
+function getAllBookings() {
+  // For Admin: Get recent bookings (limit 50 for performance)
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Bookings');
+  const data = sheet.getDataRange().getValues();
+  const bookings = [];
+  
+  // Iterate backwards to get latest
+  const limit = 50;
+  let count = 0;
+  
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (count >= limit) break;
+    
+    // Structure based on schema: 
+    // ID, CourtID, Date, SlotID, Hour, Name, Email, Phone, Price, CreatedAt, BillCode
+    bookings.push({
+      id: data[i][0],
+      courtId: data[i][1],
+      date: data[i][2],
+      timeSlotId: data[i][3],
+      userName: data[i][5],
+      userPhone: data[i][7],
+      totalPrice: data[i][8],
+      billCode: data[i][10] || '-'
+    });
+    count++;
+  }
+  
+  return responseJSON(bookings);
 }
 
 function createBooking(payload) {

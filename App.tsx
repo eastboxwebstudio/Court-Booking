@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { BookingDetails, BookingStep, Court, TimeSlot } from './types';
+import { BookingDetails, BookingStep, Court, TimeSlot, AppView, BookingRecord } from './types';
 import CourtCard from './components/CourtCard';
 import ChatBot from './components/ChatBot';
 import { 
@@ -30,7 +30,12 @@ import {
   HelpCircle,
   FileText,
   RefreshCw,
-  Save
+  Save,
+  Lock,
+  LayoutDashboard,
+  List,
+  LogOut,
+  Edit2
 } from 'lucide-react';
 
 // --- CONFIGURATION ---
@@ -40,6 +45,7 @@ const DEFAULT_GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxT68
 const START_HOUR = 8; // 8 AM
 const END_HOUR = 23; // 11 PM
 const BOOKING_TIMEOUT_MS = 15 * 60 * 1000; // 15 Minutes
+const ADMIN_PIN = "1234"; // Simple PIN for demo
 
 // --- MOCK DATA (Fallback) ---
 const MOCK_COURTS: Court[] = [
@@ -59,12 +65,15 @@ interface ToastState {
 }
 
 const App: React.FC = () => {
+  // App View State
+  const [currentView, setCurrentView] = useState<AppView>(AppView.USER);
+  const [adminPin, setAdminPin] = useState("");
+
   const [step, setStep] = useState<BookingStep>(BookingStep.SELECT_COURT);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [isOfflineMode, setIsOfflineMode] = useState(false);
   
-  // Settings State
-  const [showSettings, setShowSettings] = useState(false);
+  // Settings State (Now Admin Only)
   const [scriptUrl, setScriptUrl] = useState(DEFAULT_GOOGLE_SCRIPT_URL);
   
   // Payment Processing State
@@ -82,6 +91,10 @@ const App: React.FC = () => {
   const [courts, setCourts] = useState<Court[]>([]);
   const [bookedSlots, setBookedSlots] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+
+  // Admin Data States
+  const [adminBookings, setAdminBookings] = useState<BookingRecord[]>([]);
+  const [adminActiveTab, setAdminActiveTab] = useState<'orders' | 'content' | 'settings'>('orders');
 
   const [details, setDetails] = useState<BookingDetails>({
     courtId: null,
@@ -176,7 +189,7 @@ const App: React.FC = () => {
       if (Array.isArray(data) && data.length > 0) {
           setCourts(data);
           setIsOfflineMode(false);
-          showToast("Berjaya sambung ke server!", "success");
+          if (currentView === AppView.USER) showToast("Berjaya sambung ke server!", "success");
       } else {
           throw new Error("Invalid or empty data from sheet");
       }
@@ -184,7 +197,7 @@ const App: React.FC = () => {
       console.warn("Using Offline Data (Courts):", e);
       setCourts(MOCK_COURTS);
       setIsOfflineMode(true);
-      showToast("Gagal sambung ke server. Mod Offline diaktifkan.", "warning");
+      if (currentView === AppView.USER) showToast("Gagal sambung ke server. Mod Offline diaktifkan.", "warning");
     } finally {
       setLoading(false);
     }
@@ -198,6 +211,7 @@ const App: React.FC = () => {
   // Fetch Booked Slots when Date changes
   useEffect(() => {
     const fetchBookings = async () => {
+        if (currentView !== AppView.USER) return; // Don't fetch user slots if in admin
         const dateStr = getFormattedDateValue(details.date);
         try {
             const res = await fetch(`${scriptUrl}?action=getBookings&date=${dateStr}`);
@@ -215,7 +229,56 @@ const App: React.FC = () => {
         }
     };
     fetchBookings();
-  }, [details.date, scriptUrl]);
+  }, [details.date, scriptUrl, currentView]);
+
+  // --- ADMIN FUNCTIONS ---
+  const fetchAllBookings = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`${scriptUrl}?action=getAllBookings`);
+        if (!res.ok) throw new Error("Network fail");
+        const data = await res.json();
+        setAdminBookings(data);
+      } catch (e) {
+          showToast("Gagal mengambil data tempahan", "error");
+      } finally {
+          setLoading(false);
+      }
+  };
+
+  const updateCourtDetails = async (courtId: number, newPrice?: number, isAvailable?: boolean) => {
+      // Optimistic update
+      setCourts(prev => prev.map(c => 
+          c.id === courtId 
+          ? { ...c, ...(newPrice !== undefined ? {pricePerHour: newPrice} : {}), ...(isAvailable !== undefined ? {isAvailable} : {}) } 
+          : c
+      ));
+
+      try {
+          const payload = {
+              action: 'updateCourt',
+              id: courtId,
+              pricePerHour: newPrice,
+              isAvailable: isAvailable
+          };
+          await fetch(scriptUrl, {
+              method: 'POST',
+              headers: { "Content-Type": "text/plain;charset=utf-8" },
+              body: JSON.stringify(payload)
+          });
+          showToast("Kemaskini berjaya", "success");
+      } catch(e) {
+          showToast("Gagal kemaskini server, sila cuba lagi", "error");
+          fetchCourts(); // Revert
+      }
+  };
+
+  useEffect(() => {
+      if (currentView === AppView.ADMIN_DASHBOARD && adminActiveTab === 'orders') {
+          fetchAllBookings();
+      }
+  }, [currentView, adminActiveTab]);
+
 
   // --- Auto-Save User Profile ---
   const handleUserDetailsChange = (field: 'userName' | 'userEmail' | 'userPhone', value: string) => {
@@ -234,9 +297,17 @@ const App: React.FC = () => {
   const handleSaveSettings = (newUrl: string) => {
       setScriptUrl(newUrl);
       localStorage.setItem('courtMasScriptUrl', newUrl);
-      setShowSettings(false);
-      showToast("URL Server dikemaskini. Mencuba sambungan...", "warning");
-      // fetchCourts will trigger automatically due to useEffect dependency
+      showToast("URL Server dikemaskini.", "success");
+  };
+
+  const handleAdminLogin = () => {
+      if (adminPin === ADMIN_PIN) {
+          setCurrentView(AppView.ADMIN_DASHBOARD);
+          setAdminPin("");
+      } else {
+          showToast("PIN Salah!", "error");
+          setAdminPin("");
+      }
   };
 
   // Generate next 14 days for Quick Date Strip
@@ -573,43 +644,190 @@ const App: React.FC = () => {
       }, 6000); 
   };
 
-  // --- Main View Logic ---
-  
-  // Settings Modal
-  if (showSettings) {
-      return (
-          <div className="fixed inset-0 z-[70] bg-black/60 flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl animate-fade-in-up">
-                  <div className="flex justify-between items-center mb-6">
-                      <h2 className="text-xl font-bold flex items-center gap-2 text-gray-800">
-                          <Settings className="w-6 h-6 text-gray-600" />
-                          Tetapan Server
-                      </h2>
-                      <button onClick={() => setShowSettings(false)} className="bg-gray-100 p-2 rounded-full hover:bg-gray-200">
-                          <X className="w-5 h-5 text-gray-600" />
-                      </button>
-                  </div>
+  // --- VIEWS ---
 
-                  <div className="mb-6">
-                      <label className="block text-sm font-bold text-gray-600 mb-2">Google Apps Script Web App URL</label>
-                      <p className="text-xs text-gray-400 mb-2">Masukkan URL yang anda dapat dari "Deploy" di sini.</p>
-                      <textarea 
-                          rows={4}
-                          value={scriptUrl}
-                          onChange={(e) => setScriptUrl(e.target.value)}
-                          className="w-full bg-gray-50 border border-gray-300 rounded-lg p-3 text-xs font-mono text-gray-700 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
-                          placeholder="https://script.google.com/macros/s/..."
-                      />
+  // 1. Admin Login View
+  if (currentView === AppView.ADMIN_LOGIN) {
+      return (
+          <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6">
+              <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center">
+                  <div className="w-16 h-16 bg-gray-900 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <Lock className="w-8 h-8 text-white" />
                   </div>
+                  <h2 className="text-xl font-bold text-gray-800 mb-6">Akses Admin</h2>
+                  
+                  <input 
+                      type="password"
+                      value={adminPin}
+                      onChange={(e) => setAdminPin(e.target.value)}
+                      placeholder="Masukkan PIN"
+                      className="w-full text-center text-2xl tracking-widest p-3 bg-gray-100 rounded-xl border border-gray-300 mb-6 focus:ring-2 focus:ring-emerald-500 outline-none"
+                      maxLength={4}
+                  />
 
                   <button 
-                      onClick={() => handleSaveSettings(scriptUrl)}
-                      className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-700 transition"
+                      onClick={handleAdminLogin}
+                      className="w-full bg-gray-900 text-white py-3 rounded-xl font-bold mb-3 hover:bg-gray-800"
                   >
-                      <Save className="w-5 h-5" />
-                      Simpan & Sambung
+                      Masuk
+                  </button>
+                  <button 
+                      onClick={() => setCurrentView(AppView.USER)}
+                      className="text-sm text-gray-500 hover:text-gray-700"
+                  >
+                      Batal
                   </button>
               </div>
+          </div>
+      )
+  }
+
+  // 2. Admin Dashboard View
+  if (currentView === AppView.ADMIN_DASHBOARD) {
+      return (
+          <div className="min-h-screen bg-gray-100 pb-20">
+              {/* Admin Header */}
+              <div className="bg-gray-900 text-white p-6 rounded-b-[2rem] shadow-lg mb-6">
+                  <div className="flex justify-between items-center mb-6">
+                      <h2 className="text-xl font-bold flex items-center gap-2">
+                          <LayoutDashboard className="w-6 h-6 text-emerald-400" />
+                          Admin Panel
+                      </h2>
+                      <button 
+                        onClick={() => setCurrentView(AppView.USER)} 
+                        className="bg-gray-800 p-2 rounded-full hover:bg-gray-700 text-xs flex items-center gap-2 px-4"
+                      >
+                          <LogOut className="w-3 h-3" /> Logout
+                      </button>
+                  </div>
+                  
+                  {/* Tabs */}
+                  <div className="flex bg-gray-800 p-1 rounded-xl">
+                      <button 
+                        onClick={() => setAdminActiveTab('orders')}
+                        className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 ${adminActiveTab === 'orders' ? 'bg-emerald-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
+                      >
+                        <List className="w-3 h-3" /> Tempahan
+                      </button>
+                      <button 
+                        onClick={() => setAdminActiveTab('content')}
+                        className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 ${adminActiveTab === 'content' ? 'bg-emerald-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
+                      >
+                        <Edit2 className="w-3 h-3" /> Gelanggang
+                      </button>
+                      <button 
+                        onClick={() => setAdminActiveTab('settings')}
+                        className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 ${adminActiveTab === 'settings' ? 'bg-emerald-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
+                      >
+                        <Settings className="w-3 h-3" /> Settings
+                      </button>
+                  </div>
+              </div>
+
+              {/* Toast for Admin */}
+              {toast && (
+                <div className={`
+                    fixed top-4 left-1/2 transform -translate-x-1/2 w-[90%] max-w-sm p-3 rounded-lg shadow-xl flex items-center gap-3 z-[100]
+                    ${toast.type === 'error' ? 'bg-red-500 text-white' : 'bg-emerald-600 text-white'}
+                `}>
+                    <span className="text-sm font-semibold">{toast.message}</span>
+                </div>
+              )}
+
+              {/* Tab 1: Orders */}
+              {adminActiveTab === 'orders' && (
+                  <div className="px-4 space-y-4">
+                      <div className="flex justify-between items-center mb-2">
+                          <h3 className="font-bold text-gray-700">Terbaru (50)</h3>
+                          <button onClick={fetchAllBookings} className="text-emerald-600 text-xs font-bold flex items-center gap-1">
+                              <RefreshCw className="w-3 h-3" /> Refresh
+                          </button>
+                      </div>
+
+                      {loading ? (
+                          <div className="flex justify-center py-10"><Loader2 className="w-8 h-8 animate-spin text-gray-400"/></div>
+                      ) : adminBookings.length === 0 ? (
+                          <div className="text-center py-10 text-gray-400">Tiada tempahan.</div>
+                      ) : (
+                          adminBookings.map((b, i) => (
+                              <div key={i} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                                  <div className="flex justify-between items-start mb-2">
+                                      <div>
+                                          <p className="font-bold text-gray-800 text-sm"># {b.id}</p>
+                                          <p className="text-xs text-gray-500">
+                                              {new Date(b.date).toLocaleDateString()} | {b.timeSlotId.split('-').pop()}:00
+                                          </p>
+                                      </div>
+                                      <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${b.billCode && b.billCode !== '-' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                                          {b.billCode && b.billCode !== '-' ? 'PAID' : 'PENDING'}
+                                      </span>
+                                  </div>
+                                  <div className="border-t border-gray-100 pt-2 mt-2 flex justify-between items-end">
+                                      <div>
+                                          <p className="text-sm font-medium text-gray-800">{b.userName}</p>
+                                          <p className="text-xs text-gray-400">{b.userPhone}</p>
+                                      </div>
+                                      <p className="font-bold text-emerald-600">RM {b.totalPrice}</p>
+                                  </div>
+                              </div>
+                          ))
+                      )}
+                  </div>
+              )}
+
+              {/* Tab 2: Content (Courts) */}
+              {adminActiveTab === 'content' && (
+                  <div className="px-4 space-y-4">
+                      {courts.map(court => (
+                          <div key={court.id} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
+                              <div>
+                                  <p className="font-bold text-gray-800">{court.name}</p>
+                                  <p className="text-xs text-gray-500">{court.sport} - {court.type}</p>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                  <div className="text-right">
+                                      <label className="block text-[10px] text-gray-400">RM/Jam</label>
+                                      <input 
+                                          type="number" 
+                                          defaultValue={court.pricePerHour}
+                                          onBlur={(e) => updateCourtDetails(court.id, Number(e.target.value), undefined)}
+                                          className="w-16 text-right border rounded p-1 text-sm font-bold text-gray-800"
+                                      />
+                                  </div>
+                                  <button 
+                                      onClick={() => updateCourtDetails(court.id, undefined, !court.isAvailable)}
+                                      className={`w-10 h-6 rounded-full transition-colors flex items-center px-1 ${court.isAvailable ? 'bg-emerald-500 justify-end' : 'bg-gray-300 justify-start'}`}
+                                  >
+                                      <div className="w-4 h-4 bg-white rounded-full shadow-sm"></div>
+                                  </button>
+                              </div>
+                          </div>
+                      ))}
+                  </div>
+              )}
+
+              {/* Tab 3: Settings */}
+              {adminActiveTab === 'settings' && (
+                  <div className="px-4">
+                      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                          <label className="block text-sm font-bold text-gray-600 mb-2">Google Apps Script URL</label>
+                          <textarea 
+                              rows={4}
+                              value={scriptUrl}
+                              onChange={(e) => setScriptUrl(e.target.value)}
+                              className="w-full bg-gray-50 border border-gray-300 rounded-lg p-3 text-xs font-mono text-gray-700 outline-none mb-4"
+                          />
+                          <button 
+                              onClick={() => handleSaveSettings(scriptUrl)}
+                              className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-700 transition"
+                          >
+                              <Save className="w-5 h-5" />
+                              Simpan Config
+                          </button>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-4 text-center">CourtMas Admin v1.0</p>
+                  </div>
+              )}
           </div>
       )
   }
@@ -748,14 +966,7 @@ const App: React.FC = () => {
                     </button>
                 )}
                 
-                {/* Settings Button */}
-                <button 
-                    onClick={() => setShowSettings(true)}
-                    className="w-8 h-8 bg-emerald-500 hover:bg-emerald-400 rounded-full flex items-center justify-center transition"
-                    title="Tetapan Server"
-                >
-                    <Settings className="w-4 h-4" />
-                </button>
+                {/* SETTINGS REMOVED FROM HERE FOR PUBLIC VIEW */}
 
                 <div className="w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center">
                     <User className="w-5 h-5" />
@@ -1172,46 +1383,58 @@ const App: React.FC = () => {
 
       {/* Footer Navigation */}
       <footer className="fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 p-4 shadow-lg z-30">
-        <div className="max-w-md mx-auto flex gap-3">
-            {step > BookingStep.SELECT_COURT && (
-                <button 
-                    onClick={handleBack}
-                    className="px-6 py-3 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition"
-                >
-                    <ChevronLeft className="w-6 h-6" />
-                </button>
-            )}
-            <button 
-                onClick={handleNext}
-                disabled={
-                    (step === BookingStep.SELECT_COURT && !details.courtId) ||
-                    (step === BookingStep.SELECT_DATE_TIME && details.selectedSlots.length === 0) ||
-                    (step === BookingStep.SUMMARY && (!details.userName || !details.userEmail || !details.userPhone || !agreedToTerms))
-                }
-                className={`
-                    flex-1 py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 transition-all
-                    ${
-                        ((step === BookingStep.SELECT_COURT && !details.courtId) || 
-                         (step === BookingStep.SELECT_DATE_TIME && details.selectedSlots.length === 0) ||
-                         (step === BookingStep.SUMMARY && (!details.userName || !details.userEmail || !details.userPhone || !agreedToTerms))
-                        )
-                        ? 'bg-gray-300 cursor-not-allowed'
-                        : 'bg-emerald-600 hover:bg-emerald-700 shadow-md hover:shadow-lg active:scale-95'
-                    }
-                `}
-            >
-                {step === BookingStep.SUMMARY ? (
-                    <div className="flex items-center gap-2">
-                        <span>Bayar Online (FPX)</span>
-                        <CreditCard className="w-4 h-4" />
-                    </div>
-                ) : (
-                    <>
-                        <span>Seterusnya</span>
-                        <ChevronRight className="w-5 h-5" />
-                    </>
+        <div className="max-w-md mx-auto flex flex-col gap-3">
+            <div className="flex gap-3">
+                {step > BookingStep.SELECT_COURT && (
+                    <button 
+                        onClick={handleBack}
+                        className="px-6 py-3 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition"
+                    >
+                        <ChevronLeft className="w-6 h-6" />
+                    </button>
                 )}
-            </button>
+                <button 
+                    onClick={handleNext}
+                    disabled={
+                        (step === BookingStep.SELECT_COURT && !details.courtId) ||
+                        (step === BookingStep.SELECT_DATE_TIME && details.selectedSlots.length === 0) ||
+                        (step === BookingStep.SUMMARY && (!details.userName || !details.userEmail || !details.userPhone || !agreedToTerms))
+                    }
+                    className={`
+                        flex-1 py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 transition-all
+                        ${
+                            ((step === BookingStep.SELECT_COURT && !details.courtId) || 
+                            (step === BookingStep.SELECT_DATE_TIME && details.selectedSlots.length === 0) ||
+                            (step === BookingStep.SUMMARY && (!details.userName || !details.userEmail || !details.userPhone || !agreedToTerms))
+                            )
+                            ? 'bg-gray-300 cursor-not-allowed'
+                            : 'bg-emerald-600 hover:bg-emerald-700 shadow-md hover:shadow-lg active:scale-95'
+                        }
+                    `}
+                >
+                    {step === BookingStep.SUMMARY ? (
+                        <div className="flex items-center gap-2">
+                            <span>Bayar Online (FPX)</span>
+                            <CreditCard className="w-4 h-4" />
+                        </div>
+                    ) : (
+                        <>
+                            <span>Seterusnya</span>
+                            <ChevronRight className="w-5 h-5" />
+                        </>
+                    )}
+                </button>
+            </div>
+            
+            {/* Hidden Admin Link */}
+            <div className="text-center pt-1">
+                <button 
+                  onClick={() => setCurrentView(AppView.ADMIN_LOGIN)}
+                  className="text-[10px] text-gray-300 hover:text-gray-500 transition-colors"
+                >
+                    Admin Login
+                </button>
+            </div>
         </div>
       </footer>
 

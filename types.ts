@@ -29,11 +29,30 @@ export interface BookingDetails {
   bookingExpiry: number | null; // Timestamp when booking expires
 }
 
+// Interface for fetching booking list in Admin
+export interface BookingRecord {
+  id: number;
+  courtId: number;
+  date: string;
+  timeSlotId: string;
+  userName: string;
+  userPhone: string;
+  totalPrice: number;
+  billCode: string;
+  timestamp: string;
+}
+
 export enum BookingStep {
   SELECT_COURT = 1,
   SELECT_DATE_TIME = 2,
   SUMMARY = 3,
   SUCCESS = 4, // Updated sequence
+}
+
+export enum AppView {
+  USER = 'USER',
+  ADMIN_LOGIN = 'ADMIN_LOGIN',
+  ADMIN_DASHBOARD = 'ADMIN_DASHBOARD'
 }
 
 export interface Message {
