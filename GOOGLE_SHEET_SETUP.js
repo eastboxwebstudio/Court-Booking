@@ -98,15 +98,18 @@ function doPost(e) {
 
 // --- FUNGSI KHAS: AUTHORIZATION ---
 function authorizeScript() {
-  // Jalankan function ini SEKALI dalam editor untuk memberi izin akses internet
-  console.log("Menguji kebenaran akses internet...");
-  try {
-    UrlFetchApp.fetch("https://www.google.com");
-    console.log("BERJAYA! Skrip kini mempunyai kebenaran UrlFetchApp.");
-    console.log("PENTING: Pastikan DEPLOYMENT disetkan kepada 'Execute as: Me' dan 'Who has access: Anyone'.");
-  } catch (e) {
-    console.log("RALAT: " + e.toString());
-  }
+  // Jalankan function ini SEKALI dalam editor.
+  // KITA BUANG TRY-CATCH SUPAYA GOOGLE TERPAKSA MINTA PERMISSION (POPUP AKAN KELUAR).
+  
+  console.log("⏳ Memulakan proses authorisasi...");
+  console.log("⚠️ Sila periksa skrin anda untuk popup 'Authorization Required'.");
+  
+  // Panggilan dummy ini akan memaksa Google meminta izin UrlFetchApp
+  const response = UrlFetchApp.fetch("https://www.google.com");
+  
+  console.log("✅ BERJAYA! Status code: " + response.getResponseCode());
+  console.log("✅ Skrip kini mempunyai kebenaran akses internet.");
+  console.log("📢 PENTING: Sila pergi ke 'Deploy' > 'Manage Deployments' > 'Edit' > 'New version' > 'Deploy' sekarang!");
 }
 
 // --- TOYYIBPAY LOGIC ---

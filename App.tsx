@@ -29,12 +29,13 @@ import {
   Settings,
   HelpCircle,
   FileText,
-  RefreshCw
+  RefreshCw,
+  Save
 } from 'lucide-react';
 
 // --- CONFIGURATION ---
-// PENTING: Gantikan URL ini dengan URL "Web App" anda sendiri selepas Deploy!
-const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxT68ovDtZNVoFQ49-7bQb0GaqOryGY2ZN2xXo4KFK-6Ec6zeOhdnqiX9WHBYdYcPAd/exec"; 
+// DEFAULT URL (Fallback jika user belum set dalam Settings)
+const DEFAULT_GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxT68ovDtZNVoFQ49-7bQb0GaqOryGY2ZN2xXo4KFK-6Ec6zeOhdnqiX9WHBYdYcPAd/exec"; 
 
 const START_HOUR = 8; // 8 AM
 const END_HOUR = 23; // 11 PM
@@ -60,9 +61,11 @@ interface ToastState {
 const App: React.FC = () => {
   const [step, setStep] = useState<BookingStep>(BookingStep.SELECT_COURT);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
-  const [configError, setConfigError] = useState(false);
   const [isOfflineMode, setIsOfflineMode] = useState(false);
-  const [showHelpModal, setShowHelpModal] = useState(false);
+  
+  // Settings State
+  const [showSettings, setShowSettings] = useState(false);
+  const [scriptUrl, setScriptUrl] = useState(DEFAULT_GOOGLE_SCRIPT_URL);
   
   // Payment Processing State
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
@@ -106,9 +109,10 @@ const App: React.FC = () => {
   
   // 1. Check Config & Return URL
   useEffect(() => {
-    // VALIDATION: Check if user put the wrong URL in GOOGLE_SCRIPT_URL
-    if (GOOGLE_SCRIPT_URL.includes("workers.dev") || GOOGLE_SCRIPT_URL.includes("pages.dev") || GOOGLE_SCRIPT_URL.includes("vercel.app")) {
-        alert("RALAT CONFIG: Anda telah memasukkan URL Website ke dalam 'GOOGLE_SCRIPT_URL' di App.tsx. Sila masukkan URL Google Apps Script (bermula dengan script.google.com).");
+    // Load Custom URL from LocalStorage if exists
+    const savedUrl = localStorage.getItem('courtMasScriptUrl');
+    if (savedUrl) {
+        setScriptUrl(savedUrl);
     }
 
     // LOAD SAVED USER DETAILS (Convenience feature)
@@ -158,19 +162,13 @@ const App: React.FC = () => {
         }
         window.history.replaceState({}, document.title, "/");
     }
-
-    if (GOOGLE_SCRIPT_URL.includes("REPLACE_ME")) {
-        setConfigError(true);
-    }
   }, []);
 
   // --- API Fetching ---
   const fetchCourts = async () => {
     setLoading(true);
     try {
-      if (configError) throw new Error("Config not set");
-
-      const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getCourts`);
+      const res = await fetch(`${scriptUrl}?action=getCourts`);
       if (!res.ok) throw new Error("Network response was not ok");
       
       const data = await res.json();
@@ -178,7 +176,7 @@ const App: React.FC = () => {
       if (Array.isArray(data) && data.length > 0) {
           setCourts(data);
           setIsOfflineMode(false);
-          showToast("Bersambung ke server.", "success");
+          showToast("Berjaya sambung ke server!", "success");
       } else {
           throw new Error("Invalid or empty data from sheet");
       }
@@ -186,24 +184,23 @@ const App: React.FC = () => {
       console.warn("Using Offline Data (Courts):", e);
       setCourts(MOCK_COURTS);
       setIsOfflineMode(true);
+      showToast("Gagal sambung ke server. Mod Offline diaktifkan.", "warning");
     } finally {
       setLoading(false);
     }
   };
 
-  // Fetch Courts on Load
+  // Fetch Courts on Load or when URL changes
   useEffect(() => {
     fetchCourts();
-  }, [configError]);
+  }, [scriptUrl]);
 
   // Fetch Booked Slots when Date changes
   useEffect(() => {
     const fetchBookings = async () => {
         const dateStr = getFormattedDateValue(details.date);
         try {
-            if (configError) throw new Error("Config not set");
-
-            const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getBookings&date=${dateStr}`);
+            const res = await fetch(`${scriptUrl}?action=getBookings&date=${dateStr}`);
             if (!res.ok) throw new Error("Network response was not ok");
             
             const data = await res.json();
@@ -218,7 +215,7 @@ const App: React.FC = () => {
         }
     };
     fetchBookings();
-  }, [details.date, configError]);
+  }, [details.date, scriptUrl]);
 
   // --- Auto-Save User Profile ---
   const handleUserDetailsChange = (field: 'userName' | 'userEmail' | 'userPhone', value: string) => {
@@ -232,6 +229,14 @@ const App: React.FC = () => {
           }));
           return newDetails;
       });
+  };
+
+  const handleSaveSettings = (newUrl: string) => {
+      setScriptUrl(newUrl);
+      localStorage.setItem('courtMasScriptUrl', newUrl);
+      setShowSettings(false);
+      showToast("URL Server dikemaskini. Mencuba sambungan...", "warning");
+      // fetchCourts will trigger automatically due to useEffect dependency
   };
 
   // Generate next 14 days for Quick Date Strip
@@ -447,7 +452,7 @@ const App: React.FC = () => {
             userPhone: cleanPhone // Use sanitized phone
         };
 
-        const res = await fetch(GOOGLE_SCRIPT_URL, {
+        const res = await fetch(scriptUrl, {
             method: 'POST',
             headers: { "Content-Type": "text/plain;charset=utf-8" },
             body: JSON.stringify(payload)
@@ -460,7 +465,7 @@ const App: React.FC = () => {
             data = JSON.parse(text);
         } catch (jsonError) {
             console.error("Non-JSON response from server:", text);
-            throw new Error("Ralat Server: Sila pastikan anda telah tekan 'Deploy New Version' dalam Google Apps Script.");
+            throw new Error("Ralat Server: Sila pastikan URL Google Apps Script betul.");
         }
 
         if (data.status === 'success' && data.paymentUrl) {
@@ -474,7 +479,7 @@ const App: React.FC = () => {
         } else if (data.message && (data.message.includes("PERMISSION") || data.message.includes("permission"))) {
             // Specific Handler for GAS Permissions
             setIsProcessingPayment(false);
-            setShowHelpModal(true);
+            showToast("Ralat Permission Server. Sila semak setting deploy.", "error");
         } else {
             // Throw specific error from backend
             throw new Error(data.message || 'Gagal mendapatkan link pembayaran.');
@@ -488,7 +493,7 @@ const App: React.FC = () => {
         // Detect permission error from GAS and suggest Redeploy
         if (msg.includes("permission") || msg.includes("UrlFetchApp") || msg.includes("PERMISSION ERROR")) {
              setIsProcessingPayment(false);
-             setShowHelpModal(true);
+             showToast("Ralat: Server perlu di-authorize.", "error");
              return;
         }
 
@@ -512,7 +517,7 @@ const App: React.FC = () => {
             billCode: billCode
         };
 
-        const res = await fetch(GOOGLE_SCRIPT_URL, {
+        const res = await fetch(scriptUrl, {
             method: 'POST',
             headers: { "Content-Type": "text/plain;charset=utf-8" },
             body: JSON.stringify(payload)
@@ -570,60 +575,43 @@ const App: React.FC = () => {
 
   // --- Main View Logic ---
   
-  // Troubleshooting Modal
-  if (showHelpModal) {
-    return (
-        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl relative max-h-[90vh] overflow-y-auto">
-                <div className="flex items-center gap-3 mb-4 text-red-600">
-                    <Settings className="w-8 h-8" />
-                    <h2 className="text-xl font-bold">Ralat Konfigurasi Server</h2>
-                </div>
-                
-                <p className="text-gray-600 mb-4 text-sm">
-                    Aplikasi gagal berhubung dengan Google Apps Script. Ini biasanya berlaku kerana 3 sebab utama.
-                </p>
+  // Settings Modal
+  if (showSettings) {
+      return (
+          <div className="fixed inset-0 z-[70] bg-black/60 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl animate-fade-in-up">
+                  <div className="flex justify-between items-center mb-6">
+                      <h2 className="text-xl font-bold flex items-center gap-2 text-gray-800">
+                          <Settings className="w-6 h-6 text-gray-600" />
+                          Tetapan Server
+                      </h2>
+                      <button onClick={() => setShowSettings(false)} className="bg-gray-100 p-2 rounded-full hover:bg-gray-200">
+                          <X className="w-5 h-5 text-gray-600" />
+                      </button>
+                  </div>
 
-                <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6 text-sm space-y-4">
-                    
-                    {/* Sebab 1: URL */}
-                    <div>
-                        <p className="font-bold text-gray-800 mb-1">1. URL Skrip Salah</p>
-                        <p className="text-xs text-gray-600">Adakah anda sudah menukar <code>const GOOGLE_SCRIPT_URL</code> di dalam fail <code>App.tsx</code> kepada URL anda sendiri?</p>
-                    </div>
+                  <div className="mb-6">
+                      <label className="block text-sm font-bold text-gray-600 mb-2">Google Apps Script Web App URL</label>
+                      <p className="text-xs text-gray-400 mb-2">Masukkan URL yang anda dapat dari "Deploy" di sini.</p>
+                      <textarea 
+                          rows={4}
+                          value={scriptUrl}
+                          onChange={(e) => setScriptUrl(e.target.value)}
+                          className="w-full bg-gray-50 border border-gray-300 rounded-lg p-3 text-xs font-mono text-gray-700 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                          placeholder="https://script.google.com/macros/s/..."
+                      />
+                  </div>
 
-                    {/* Sebab 2: Permission */}
-                    <div>
-                        <p className="font-bold text-gray-800 mb-1">2. Belum Authorize (Izin)</p>
-                        <ul className="list-disc list-inside text-xs text-gray-600 pl-1">
-                            <li>Buka Google Apps Script.</li>
-                            <li>Pilih function <code>authorizeScript</code> di atas toolbar.</li>
-                            <li>Tekan <strong>Run</strong> dan berikan kebenaran (Review Permissions).</li>
-                        </ul>
-                    </div>
-
-                    {/* Sebab 3: Deployment */}
-                    <div>
-                        <p className="font-bold text-gray-800 mb-1">3. Deployment Salah</p>
-                        <ul className="list-disc list-inside text-xs text-gray-600 pl-1">
-                            <li>Klik <strong>Deploy</strong> {'>'} <strong>Manage Deployments</strong>.</li>
-                            <li>Edit (Ikon Pensil).</li>
-                            <li><strong>Execute as:</strong> Me (Email anda).</li>
-                            <li><strong>Who has access:</strong> Anyone.</li>
-                            <li><strong>Version:</strong> New version.</li>
-                        </ul>
-                    </div>
-                </div>
-
-                <button 
-                    onClick={() => setShowHelpModal(false)}
-                    className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 transition"
-                >
-                    Saya Sudah Betulkan
-                </button>
-            </div>
-        </div>
-    );
+                  <button 
+                      onClick={() => handleSaveSettings(scriptUrl)}
+                      className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-700 transition"
+                  >
+                      <Save className="w-5 h-5" />
+                      Simpan & Sambung
+                  </button>
+              </div>
+          </div>
+      )
   }
 
   // Loading Screen for Payment Processing
@@ -759,6 +747,16 @@ const App: React.FC = () => {
                         <span className="text-[10px] font-bold text-yellow-100">Offline</span>
                     </button>
                 )}
+                
+                {/* Settings Button */}
+                <button 
+                    onClick={() => setShowSettings(true)}
+                    className="w-8 h-8 bg-emerald-500 hover:bg-emerald-400 rounded-full flex items-center justify-center transition"
+                    title="Tetapan Server"
+                >
+                    <Settings className="w-4 h-4" />
+                </button>
+
                 <div className="w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center">
                     <User className="w-5 h-5" />
                 </div>
