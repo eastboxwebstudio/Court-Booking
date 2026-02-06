@@ -12,13 +12,11 @@ import {
   User,
   Mail,
   Phone,
-  Timer,
   Hourglass,
   CalendarDays,
   Activity,
   Trophy,
   AlertCircle,
-  WifiOff,
   X,
   Loader2,
   CreditCard,
@@ -26,21 +24,14 @@ import {
   Share2,
   ExternalLink,
   Settings,
-  HelpCircle,
-  FileText,
   RefreshCw,
   Save,
   Lock,
   LayoutDashboard,
   List,
   LogOut,
-  Edit2,
-  Server
+  Edit2
 } from 'lucide-react';
-
-// --- CONFIGURATION ---
-// DEFAULT URL (Fallback jika user belum set dalam Settings)
-const DEFAULT_GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxT68ovDtZNVoFQ49-7bQb0GaqOryGY2ZN2xXo4KFK-6Ec6zeOhdnqiX9WHBYdYcPAd/exec"; 
 
 const START_HOUR = 8; // 8 AM
 const END_HOUR = 23; // 11 PM
@@ -67,20 +58,16 @@ const App: React.FC = () => {
   // App View State
   const [currentView, setCurrentView] = useState<AppView>(AppView.USER);
   const [adminPin, setAdminPin] = useState("");
-  const [isVerifyingPin, setIsVerifyingPin] = useState(false); // Loading state for login
-  const [showConfigInLogin, setShowConfigInLogin] = useState(false); // Toggle for config in login screen
+  const [isVerifyingPin, setIsVerifyingPin] = useState(false); 
 
   const [step, setStep] = useState<BookingStep>(BookingStep.SELECT_COURT);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [isOfflineMode, setIsOfflineMode] = useState(false);
   
-  // Settings State (Now Admin Only)
-  const [scriptUrl, setScriptUrl] = useState(DEFAULT_GOOGLE_SCRIPT_URL);
-  
   // Payment Processing State
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
-  const [paymentUrl, setPaymentUrl] = useState<string | null>(null); // For manual fallback
-  const [agreedToTerms, setAgreedToTerms] = useState(false); // New T&C State
+  const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
+  const [agreedToTerms, setAgreedToTerms] = useState(false); 
 
   // Toast State
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -95,7 +82,7 @@ const App: React.FC = () => {
 
   // Admin Data States
   const [adminBookings, setAdminBookings] = useState<BookingRecord[]>([]);
-  const [adminActiveTab, setAdminActiveTab] = useState<'orders' | 'content' | 'settings'>('orders');
+  const [adminActiveTab, setAdminActiveTab] = useState<'orders' | 'content'>('orders');
 
   const [details, setDetails] = useState<BookingDetails>({
     courtId: null,
@@ -121,14 +108,7 @@ const App: React.FC = () => {
 
   // --- INITIALIZATION ---
   
-  // 1. Check Config & Return URL
   useEffect(() => {
-    // Load Custom URL from LocalStorage if exists
-    const savedUrl = localStorage.getItem('courtMasScriptUrl');
-    if (savedUrl) {
-        setScriptUrl(savedUrl);
-    }
-
     // LOAD SAVED USER DETAILS (Convenience feature)
     const savedUser = localStorage.getItem('userProfile');
     if (savedUser) {
@@ -182,40 +162,45 @@ const App: React.FC = () => {
   const fetchCourts = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${scriptUrl}?action=getCourts`);
+      // Fetch from internal API
+      const res = await fetch(`/api/courts`);
       if (!res.ok) throw new Error("Network response was not ok");
       
       const data = await res.json();
       
       if (Array.isArray(data) && data.length > 0) {
-          setCourts(data);
+          // Ensure boolean conversion for D1 (SQLite uses 0/1)
+          const cleanData = data.map((c: any) => ({
+            ...c,
+            isAvailable: !!c.isAvailable
+          }));
+          setCourts(cleanData);
           setIsOfflineMode(false);
-          if (currentView === AppView.USER) showToast("Berjaya sambung ke server!", "success");
       } else {
-          throw new Error("Invalid or empty data from sheet");
+          throw new Error("Invalid or empty data from db");
       }
     } catch (e) {
       console.warn("Using Offline Data (Courts):", e);
       setCourts(MOCK_COURTS);
       setIsOfflineMode(true);
-      if (currentView === AppView.USER) showToast("Gagal sambung ke server. Mod Offline diaktifkan.", "warning");
+      if (currentView === AppView.USER) showToast("Mod Offline diaktifkan (Ralat Server).", "warning");
     } finally {
       setLoading(false);
     }
   };
 
-  // Fetch Courts on Load or when URL changes
+  // Fetch Courts on Load
   useEffect(() => {
     fetchCourts();
-  }, [scriptUrl]);
+  }, []);
 
   // Fetch Booked Slots when Date changes
   useEffect(() => {
     const fetchBookings = async () => {
-        if (currentView !== AppView.USER) return; // Don't fetch user slots if in admin
+        if (currentView !== AppView.USER) return; 
         const dateStr = getFormattedDateValue(details.date);
         try {
-            const res = await fetch(`${scriptUrl}?action=getBookings&date=${dateStr}`);
+            const res = await fetch(`/api/bookings?date=${dateStr}`);
             if (!res.ok) throw new Error("Network response was not ok");
             
             const data = await res.json();
@@ -230,32 +215,20 @@ const App: React.FC = () => {
         }
     };
     fetchBookings();
-  }, [details.date, scriptUrl, currentView]);
+  }, [details.date, currentView]);
 
   // --- ADMIN FUNCTIONS ---
   const fetchAllBookings = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`${scriptUrl}?action=getAllBookings`);
+        const res = await fetch(`/api/admin/bookings`);
         if (!res.ok) throw new Error("Network fail");
         
-        // Safety: Parse text first to catch non-JSON (HTML) responses
-        const text = await res.text();
-        let data;
-        try {
-            data = JSON.parse(text);
-        } catch (e) {
-             throw new Error("Invalid JSON from server");
-        }
-
+        const data = await res.json();
         if (Array.isArray(data)) {
             setAdminBookings(data);
         } else {
-            console.error("Expected Array, got:", data);
             setAdminBookings([]); 
-            if (data.status === 'error') {
-                 showToast(data.message || "Ralat Server", "error");
-            }
         }
       } catch (e) {
           console.error(e);
@@ -276,19 +249,18 @@ const App: React.FC = () => {
 
       try {
           const payload = {
-              action: 'updateCourt',
               id: courtId,
               pricePerHour: newPrice,
               isAvailable: isAvailable
           };
-          await fetch(scriptUrl, {
+          await fetch('/api/admin/court-update', {
               method: 'POST',
-              headers: { "Content-Type": "text/plain;charset=utf-8" },
+              headers: { "Content-Type": "application/json" },
               body: JSON.stringify(payload)
           });
           showToast("Kemaskini berjaya", "success");
       } catch(e) {
-          showToast("Gagal kemaskini server, sila cuba lagi", "error");
+          showToast("Gagal kemaskini server", "error");
           fetchCourts(); // Revert
       }
   };
@@ -304,7 +276,6 @@ const App: React.FC = () => {
   const handleUserDetailsChange = (field: 'userName' | 'userEmail' | 'userPhone', value: string) => {
       setDetails(prev => {
           const newDetails = { ...prev, [field]: value };
-          // Save to local storage for future visits
           localStorage.setItem('userProfile', JSON.stringify({
               name: newDetails.userName,
               email: newDetails.userEmail,
@@ -312,17 +283,6 @@ const App: React.FC = () => {
           }));
           return newDetails;
       });
-  };
-
-  const handleSaveSettings = (newUrl: string) => {
-      if (!newUrl) {
-          showToast("URL tidak boleh kosong.", "error");
-          return;
-      }
-      setScriptUrl(newUrl);
-      localStorage.setItem('courtMasScriptUrl', newUrl);
-      showToast("URL Server dikemaskini.", "success");
-      setShowConfigInLogin(false);
   };
 
   // --- SECURE ADMIN LOGIN ---
@@ -335,31 +295,23 @@ const App: React.FC = () => {
       setIsVerifyingPin(true);
 
       try {
-          // Verify PIN securely with Backend
-          const res = await fetch(scriptUrl, {
+          const res = await fetch('/api/admin/verify', {
               method: 'POST',
-              headers: { "Content-Type": "text/plain;charset=utf-8" },
-              body: JSON.stringify({
-                  action: 'verifyAdmin',
-                  pin: adminPin
-              })
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ pin: adminPin })
           });
-
-          if (!res.ok) throw new Error("Ralat sambungan");
 
           const data = await res.json();
           
-          if (data.status === 'success') {
+          if (res.ok && data.status === 'success') {
               setCurrentView(AppView.ADMIN_DASHBOARD);
               showToast("Selamat datang Admin!", "success");
           } else {
-              // CHANGE HERE: Display server message directly
-              showToast(data.message || "Log Masuk Gagal", "error");
+              showToast(data.message || "PIN Salah", "error");
           }
       } catch (e) {
           console.error(e);
-          // Fallback if server unreachable/offline logic not implemented for auth
-          showToast("Gagal menyemak PIN. Pastikan URL betul.", "error");
+          showToast("Gagal menyemak PIN. Pastikan internet ada.", "error");
       } finally {
           setIsVerifyingPin(false);
           setAdminPin("");
@@ -562,78 +514,52 @@ const App: React.FC = () => {
     setPaymentUrl(null); // Reset
     
     try {
-        // 1. Save state to localStorage so we can retrieve it after redirect
+        // 1. Save state to localStorage
         localStorage.setItem('tempBooking', JSON.stringify(details));
 
-        // 2. Sanitize Phone Number (Remove spaces, dashes)
+        // 2. Sanitize Phone Number
         const cleanPhone = details.userPhone.replace(/[^0-9]/g, '');
 
-        // 3. Request Payment URL from Backend
+        // 3. Request Payment URL from Internal API
         const payload = {
-            action: 'initiatePayment',
+            action: 'initiatePayment', // optional field now, but keeping for compatibility
             courtName: selectedCourt.name,
             dateStr: getFormattedDateValue(details.date),
             totalPrice: details.totalPrice,
             userName: details.userName,
             userEmail: details.userEmail,
-            userPhone: cleanPhone // Use sanitized phone
+            userPhone: cleanPhone
         };
 
-        const res = await fetch(scriptUrl, {
+        const res = await fetch('/api/payment', {
             method: 'POST',
-            headers: { "Content-Type": "text/plain;charset=utf-8" },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload)
         });
 
-        // 4. Handle Response safely (it might be HTML error page from Google)
-        const text = await res.text();
-        let data;
-        try {
-            data = JSON.parse(text);
-        } catch (jsonError) {
-            console.error("Non-JSON response from server:", text);
-            throw new Error("Ralat Server: Sila pastikan URL Google Apps Script betul.");
-        }
+        const data = await res.json();
 
-        if (data.status === 'success' && data.paymentUrl) {
+        if (res.ok && data.status === 'success' && data.paymentUrl) {
             setPaymentUrl(data.paymentUrl);
-            
-            // 5. Redirect to ToyyibPay
             setTimeout(() => {
                 window.location.href = data.paymentUrl;
             }, 1000); 
 
-        } else if (data.message && (data.message.includes("PERMISSION") || data.message.includes("permission"))) {
-            // Specific Handler for GAS Permissions
-            setIsProcessingPayment(false);
-            showToast("Ralat Permission Server. Sila semak setting deploy.", "error");
         } else {
-            // Throw specific error from backend
             throw new Error(data.message || 'Gagal mendapatkan link pembayaran.');
         }
 
     } catch (e: any) {
         console.error("Payment Init Error:", e);
-        
-        let msg = e.message || "Ralat menghubungkan ke ToyyibPay. Sila cuba lagi.";
-        
-        // Detect permission error from GAS and suggest Redeploy
-        if (msg.includes("permission") || msg.includes("UrlFetchApp") || msg.includes("PERMISSION ERROR")) {
-             setIsProcessingPayment(false);
-             showToast("Ralat: Server perlu di-authorize.", "error");
-             return;
-        }
-
-        showToast(msg, "error");
+        showToast(e.message || "Ralat menghubungkan ke ToyyibPay.", "error");
         setIsProcessingPayment(false);
     }
   };
 
   const saveBookingToSheet = async (bookingData: BookingDetails, billCode?: string) => {
-    setIsProcessingPayment(true); // Ensure loading state is shown
+    setIsProcessingPayment(true); 
     try {
         const payload = {
-            action: 'createBooking',
             courtId: bookingData.courtId,
             date: getFormattedDateValue(bookingData.date),
             selectedSlots: bookingData.selectedSlots,
@@ -644,9 +570,9 @@ const App: React.FC = () => {
             billCode: billCode
         };
 
-        const res = await fetch(scriptUrl, {
+        const res = await fetch('/api/bookings', {
             method: 'POST',
-            headers: { "Content-Type": "text/plain;charset=utf-8" },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload)
         });
 
@@ -658,7 +584,7 @@ const App: React.FC = () => {
         
     } catch (e) {
         console.error("Save Error:", e);
-        showToast("Pembayaran berjaya, tetapi data gagal disimpan ke server. Sila simpan resit anda.", "warning");
+        showToast("Pembayaran berjaya, tetapi data gagal disimpan ke database.", "warning");
         setDetails(prev => ({ ...prev, bookingExpiry: null }));
         setStep(BookingStep.SUCCESS);
         setIsOfflineMode(true);
@@ -669,7 +595,6 @@ const App: React.FC = () => {
 
   const resetBooking = () => {
     localStorage.removeItem('tempBooking');
-    // Keep user details in local state for convenience, even if not in localStorage 'tempBooking'
     const savedUser = localStorage.getItem('userProfile');
     const userDefaults = savedUser ? JSON.parse(savedUser) : {};
 
@@ -708,59 +633,30 @@ const App: React.FC = () => {
           <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6">
               <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center relative">
                   
-                  {/* Config Toggle Button (Hidden/Subtle) */}
-                  <button 
-                    onClick={() => setShowConfigInLogin(!showConfigInLogin)}
-                    className="absolute top-4 right-4 text-gray-300 hover:text-gray-500"
-                  >
-                    <Settings className="w-5 h-5" />
-                  </button>
-
                   <div className="w-16 h-16 bg-gray-900 rounded-full flex items-center justify-center mx-auto mb-4">
                       <Lock className="w-8 h-8 text-white" />
                   </div>
                   <h2 className="text-xl font-bold text-gray-800 mb-6">Akses Admin</h2>
                   
-                  {showConfigInLogin ? (
-                    <div className="mb-4 animate-fade-in-up">
-                        <label className="block text-xs font-bold text-gray-500 mb-1 text-left">Google Script URL</label>
-                        <textarea 
-                            value={scriptUrl}
-                            onChange={(e) => setScriptUrl(e.target.value)}
-                            className="w-full text-xs p-2 bg-gray-50 border border-emerald-300 rounded-lg outline-none focus:ring-1 focus:ring-emerald-500 text-gray-700 font-mono mb-2"
-                            rows={3}
-                            placeholder="https://script.google.com/..."
-                        />
-                        <button 
-                            onClick={() => handleSaveSettings(scriptUrl)}
-                            className="w-full bg-emerald-600 text-white py-2 rounded-lg text-xs font-bold mb-4"
-                        >
-                            Simpan URL Baru
-                        </button>
-                    </div>
-                  ) : (
-                    <>
-                        <input 
-                            type="password"
-                            value={adminPin}
-                            onChange={(e) => setAdminPin(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleAdminLogin()}
-                            placeholder="Masukkan PIN"
-                            className="w-full text-center text-2xl tracking-widest p-3 bg-gray-100 rounded-xl border border-gray-300 mb-6 focus:ring-2 focus:ring-emerald-500 outline-none"
-                            maxLength={6}
-                        />
+                  <input 
+                      type="password"
+                      value={adminPin}
+                      onChange={(e) => setAdminPin(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleAdminLogin()}
+                      placeholder="Masukkan PIN"
+                      className="w-full text-center text-2xl tracking-widest p-3 bg-gray-100 rounded-xl border border-gray-300 mb-6 focus:ring-2 focus:ring-emerald-500 outline-none"
+                      maxLength={6}
+                  />
 
-                        <button 
-                            onClick={handleAdminLogin}
-                            disabled={isVerifyingPin}
-                            className="w-full bg-gray-900 text-white py-3 rounded-xl font-bold mb-3 hover:bg-gray-800 disabled:opacity-50 flex justify-center items-center gap-2"
-                        >
-                            {isVerifyingPin && <Loader2 className="w-4 h-4 animate-spin" />}
-                            {isVerifyingPin ? "Menyemak..." : "Masuk"}
-                        </button>
-                    </>
-                  )}
-
+                  <button 
+                      onClick={handleAdminLogin}
+                      disabled={isVerifyingPin}
+                      className="w-full bg-gray-900 text-white py-3 rounded-xl font-bold mb-3 hover:bg-gray-800 disabled:opacity-50 flex justify-center items-center gap-2"
+                  >
+                      {isVerifyingPin && <Loader2 className="w-4 h-4 animate-spin" />}
+                      {isVerifyingPin ? "Menyemak..." : "Masuk"}
+                  </button>
+ 
                   <button 
                       onClick={() => setCurrentView(AppView.USER)}
                       className="text-sm text-gray-500 hover:text-gray-700"
@@ -804,12 +700,6 @@ const App: React.FC = () => {
                         className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 ${adminActiveTab === 'content' ? 'bg-emerald-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
                       >
                         <Edit2 className="w-3 h-3" /> Gelanggang
-                      </button>
-                      <button 
-                        onClick={() => setAdminActiveTab('settings')}
-                        className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 ${adminActiveTab === 'settings' ? 'bg-emerald-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
-                      >
-                        <Settings className="w-3 h-3" /> Settings
                       </button>
                   </div>
               </div>
@@ -894,34 +784,11 @@ const App: React.FC = () => {
                                       onClick={() => updateCourtDetails(court.id, undefined, !court.isAvailable)}
                                       className={`w-10 h-6 rounded-full transition-colors flex items-center px-1 ${court.isAvailable ? 'bg-emerald-500 justify-end' : 'bg-gray-300 justify-start'}`}
                                   >
-                                      <div className="w-4 h-4 bg-white rounded-full shadow-sm"></div>
+                                      <div className={`w-4 h-4 bg-white rounded-full shadow-sm transform transition-transform ${court.isAvailable ? 'translate-x-0' : '-translate-x-0'}`}></div>
                                   </button>
                               </div>
                           </div>
                       ))}
-                  </div>
-              )}
-
-              {/* Tab 3: Settings */}
-              {adminActiveTab === 'settings' && (
-                  <div className="px-4">
-                      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                          <label className="block text-sm font-bold text-gray-600 mb-2">Google Apps Script URL</label>
-                          <textarea 
-                              rows={4}
-                              value={scriptUrl}
-                              onChange={(e) => setScriptUrl(e.target.value)}
-                              className="w-full bg-gray-50 border border-gray-300 rounded-lg p-3 text-xs font-mono text-gray-700 outline-none mb-4"
-                          />
-                          <button 
-                              onClick={() => handleSaveSettings(scriptUrl)}
-                              className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-700 transition"
-                          >
-                              <Save className="w-5 h-5" />
-                              Simpan Config
-                          </button>
-                      </div>
-                      <p className="text-xs text-gray-400 mt-4 text-center">CourtMas Admin v1.0</p>
                   </div>
               )}
           </div>
@@ -1062,8 +929,7 @@ const App: React.FC = () => {
                     </button>
                 )}
                 
-                {/* SETTINGS REMOVED FROM HERE FOR PUBLIC VIEW */}
-
+                {/* ADMIN ICON (No Settings anymore) */}
                 <div className="w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center">
                     <User className="w-5 h-5" />
                 </div>
@@ -1139,7 +1005,7 @@ const App: React.FC = () => {
             {loading ? (
                  <div className="text-center py-10">
                     <div className="animate-spin w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full mx-auto mb-2"></div>
-                    <p className="text-gray-400 text-sm">Menghubungi Google Sheets...</p>
+                    <p className="text-gray-400 text-sm">Mengambil Data...</p>
                  </div>
             ) : filteredCourts.length === 0 ? (
                 <div className="text-center py-10 bg-white rounded-xl border border-dashed border-gray-300">
