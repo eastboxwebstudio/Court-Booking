@@ -20,6 +20,7 @@ CREATE TABLE bookings (
   userEmail TEXT NOT NULL,
   userPhone TEXT NOT NULL,
   totalPrice REAL NOT NULL,
+  billCode TEXT,
   createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (courtId) REFERENCES courts(id)
 );

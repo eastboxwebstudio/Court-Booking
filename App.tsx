@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { BookingDetails, BookingStep, Court, TimeSlot, AppView, BookingRecord } from './types';
 import CourtCard from './components/CourtCard';
+import ChatBot from './components/ChatBot';
 import { 
   Calendar, 
   Clock, 
@@ -23,9 +24,7 @@ import {
   Camera,
   Share2,
   ExternalLink,
-  Settings,
   RefreshCw,
-  Save,
   Lock,
   LayoutDashboard,
   List,
@@ -37,7 +36,7 @@ const START_HOUR = 8; // 8 AM
 const END_HOUR = 23; // 11 PM
 const BOOKING_TIMEOUT_MS = 15 * 60 * 1000; // 15 Minutes
 
-// --- MOCK DATA (Fallback) ---
+// --- MOCK DATA (Fallback jika server offline) ---
 const MOCK_COURTS: Court[] = [
   { id: 1, name: "Court Dato' Lee", type: 'Rubber', sport: 'Badminton', pricePerHour: 20, isAvailable: true },
   { id: 2, name: "Court Misbun", type: 'Rubber', sport: 'Badminton', pricePerHour: 20, isAvailable: true },
@@ -154,22 +153,22 @@ const App: React.FC = () => {
                 showToast("Pembayaran berjaya, tetapi sesi telah tamat. Sila hubungi admin.", "warning");
              }
         }
+        // Bersihkan URL
         window.history.replaceState({}, document.title, "/");
     }
   }, []);
 
-  // --- API Fetching ---
+  // --- API Fetching (Cloudflare Worker) ---
   const fetchCourts = async () => {
     setLoading(true);
     try {
-      // Fetch from internal API
-      const res = await fetch(`/api/courts`);
+      const res = await fetch('/api/courts');
       if (!res.ok) throw new Error("Network response was not ok");
       
       const data = await res.json();
       
       if (Array.isArray(data) && data.length > 0) {
-          // Ensure boolean conversion for D1 (SQLite uses 0/1)
+          // SQLite D1 simpan boolean sebagai 0/1, kita tukar jadi boolean sebenar untuk React
           const cleanData = data.map((c: any) => ({
             ...c,
             isAvailable: !!c.isAvailable
@@ -177,13 +176,14 @@ const App: React.FC = () => {
           setCourts(cleanData);
           setIsOfflineMode(false);
       } else {
-          throw new Error("Invalid or empty data from db");
+          // Jika DB kosong, guna Mock
+          setCourts(MOCK_COURTS);
       }
     } catch (e) {
       console.warn("Using Offline Data (Courts):", e);
       setCourts(MOCK_COURTS);
       setIsOfflineMode(true);
-      if (currentView === AppView.USER) showToast("Mod Offline diaktifkan (Ralat Server).", "warning");
+      if (currentView === AppView.USER) showToast("Mod Offline (Gagal sambung ke database).", "warning");
     } finally {
       setLoading(false);
     }
@@ -206,6 +206,7 @@ const App: React.FC = () => {
             const data = await res.json();
             
             if (Array.isArray(data)) {
+                // `data` ialah array object { timeSlotId: "..." }
                 const bookedSet = new Set(data.map((d: any) => d.timeSlotId));
                 setBookedSlots(bookedSet);
             }
@@ -221,7 +222,7 @@ const App: React.FC = () => {
   const fetchAllBookings = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`/api/admin/bookings`);
+        const res = await fetch('/api/admin/bookings');
         if (!res.ok) throw new Error("Network fail");
         
         const data = await res.json();
@@ -311,7 +312,7 @@ const App: React.FC = () => {
           }
       } catch (e) {
           console.error(e);
-          showToast("Gagal menyemak PIN. Pastikan internet ada.", "error");
+          showToast("Gagal menyemak PIN.", "error");
       } finally {
           setIsVerifyingPin(false);
           setAdminPin("");
@@ -501,7 +502,7 @@ const App: React.FC = () => {
     }
   };
 
-  // --- PAYMENT LOGIC (REAL) ---
+  // --- PAYMENT LOGIC (REAL - CLOUDFLARE BACKEND) ---
 
   const handleInitiatePayment = async () => {
     if (!selectedCourt) return;
@@ -514,15 +515,14 @@ const App: React.FC = () => {
     setPaymentUrl(null); // Reset
     
     try {
-        // 1. Save state to localStorage
+        // 1. Simpan state sementara ke localStorage
         localStorage.setItem('tempBooking', JSON.stringify(details));
 
-        // 2. Sanitize Phone Number
+        // 2. Bersihkan No Telefon
         const cleanPhone = details.userPhone.replace(/[^0-9]/g, '');
 
-        // 3. Request Payment URL from Internal API
+        // 3. Request URL Pembayaran dari Backend (Worker)
         const payload = {
-            action: 'initiatePayment', // optional field now, but keeping for compatibility
             courtName: selectedCourt.name,
             dateStr: getFormattedDateValue(details.date),
             totalPrice: details.totalPrice,
@@ -570,6 +570,7 @@ const App: React.FC = () => {
             billCode: billCode
         };
 
+        // Call Worker API untuk simpan ke D1
         const res = await fetch('/api/bookings', {
             method: 'POST',
             headers: { "Content-Type": "application/json" },
@@ -584,7 +585,7 @@ const App: React.FC = () => {
         
     } catch (e) {
         console.error("Save Error:", e);
-        showToast("Pembayaran berjaya, tetapi data gagal disimpan ke database.", "warning");
+        showToast("Pembayaran berjaya, tetapi data gagal disimpan ke database. Sila simpan resit.", "warning");
         setDetails(prev => ({ ...prev, bookingExpiry: null }));
         setStep(BookingStep.SUCCESS);
         setIsOfflineMode(true);
@@ -732,6 +733,7 @@ const App: React.FC = () => {
                           adminBookings.map((b, i) => {
                               // Safety Check for rendering
                               const dateStr = b.date ? new Date(b.date).toLocaleDateString() : 'N/A';
+                              // ID slot format: YYYY-MM-DD-HOUR
                               const timeStr = b.timeSlotId && typeof b.timeSlotId === 'string' ? b.timeSlotId.split('-').pop() + ':00' : 'N/A';
                               
                               return (
@@ -1005,7 +1007,7 @@ const App: React.FC = () => {
             {loading ? (
                  <div className="text-center py-10">
                     <div className="animate-spin w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full mx-auto mb-2"></div>
-                    <p className="text-gray-400 text-sm">Mengambil Data...</p>
+                    <p className="text-gray-400 text-sm">Menyambung ke Database...</p>
                  </div>
             ) : filteredCourts.length === 0 ? (
                 <div className="text-center py-10 bg-white rounded-xl border border-dashed border-gray-300">
@@ -1399,6 +1401,7 @@ const App: React.FC = () => {
             </div>
         </div>
       </footer>
+      <ChatBot />
     </div>
   );
 };
