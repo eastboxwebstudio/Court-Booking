@@ -37,6 +37,53 @@ export default {
     // --- API ROUTES ---
     if (path.startsWith('/api/')) {
       try {
+        // 0. INIT DATABASE (Reset & Seed) - Guna ini jika database kosong/error
+        if (path === '/api/init' && request.method === 'POST') {
+            try {
+                // Drop and Recreate Tables
+                await env.DB.exec(`
+                    DROP TABLE IF EXISTS bookings;
+                    DROP TABLE IF EXISTS courts;
+
+                    CREATE TABLE courts (
+                      id INTEGER PRIMARY KEY,
+                      name TEXT NOT NULL,
+                      type TEXT NOT NULL,
+                      sport TEXT NOT NULL,
+                      pricePerHour INTEGER NOT NULL,
+                      isAvailable BOOLEAN DEFAULT 1
+                    );
+
+                    CREATE TABLE bookings (
+                      id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      courtId INTEGER NOT NULL,
+                      date TEXT NOT NULL,
+                      timeSlotId TEXT NOT NULL,
+                      hour INTEGER NOT NULL,
+                      userName TEXT NOT NULL,
+                      userEmail TEXT NOT NULL,
+                      userPhone TEXT NOT NULL,
+                      totalPrice REAL NOT NULL,
+                      billCode TEXT,
+                      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+                      FOREIGN KEY (courtId) REFERENCES courts(id)
+                    );
+
+                    INSERT INTO courts (id, name, type, sport, pricePerHour) VALUES 
+                    (1, "Court Dato' Lee", 'Rubber', 'Badminton', 20),
+                    (2, "Court Misbun", 'Rubber', 'Badminton', 20),
+                    (3, "Court Sidek", 'Parquet', 'Badminton', 15),
+                    (4, "Arena Harimau", 'FIFA Turf', 'Futsal', 80),
+                    (5, "Arena Bunga Raya", 'Vinyl', 'Futsal', 70),
+                    (6, "Pickle Pro A", 'Hard Court', 'Pickleball', 25),
+                    (7, "Pickle Pro B", 'Hard Court', 'Pickleball', 25);
+                `);
+                return Response.json({ status: 'success', message: 'Database berjaya di-reset dan di-isi data!' });
+            } catch (e: any) {
+                return Response.json({ status: 'error', message: 'Gagal Init DB: ' + e.message }, { status: 500 });
+            }
+        }
+
         // 1. GET COURTS
         if (path === '/api/courts' && request.method === 'GET') {
           const { results } = await env.DB.prepare('SELECT * FROM courts').all();

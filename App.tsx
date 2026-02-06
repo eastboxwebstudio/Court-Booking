@@ -29,7 +29,8 @@ import {
   LayoutDashboard,
   List,
   LogOut,
-  Edit2
+  Edit2,
+  Database
 } from 'lucide-react';
 
 const START_HOUR = 8; // 8 AM
@@ -58,6 +59,7 @@ const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<AppView>(AppView.USER);
   const [adminPin, setAdminPin] = useState("");
   const [isVerifyingPin, setIsVerifyingPin] = useState(false); 
+  const [isInitializingDb, setIsInitializingDb] = useState(false);
 
   const [step, setStep] = useState<BookingStep>(BookingStep.SELECT_COURT);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
@@ -316,6 +318,28 @@ const App: React.FC = () => {
       } finally {
           setIsVerifyingPin(false);
           setAdminPin("");
+      }
+  };
+
+  // --- DATABASE INITIALIZATION (FIX) ---
+  const handleInitializeDb = async () => {
+      if (!confirm("AMARAN: Ini akan memadam semua data lama dan reset database. Teruskan?")) return;
+      
+      setIsInitializingDb(true);
+      try {
+          const res = await fetch('/api/init', { method: 'POST' });
+          const data = await res.json();
+          if (res.ok) {
+              showToast("Database berjaya di-reset!", "success");
+              // Reload courts to verify
+              fetchCourts();
+          } else {
+              showToast("Gagal reset DB: " + data.message, "error");
+          }
+      } catch (e: any) {
+          showToast("Ralat Network: " + e.message, "error");
+      } finally {
+          setIsInitializingDb(false);
       }
   };
 
@@ -660,10 +684,22 @@ const App: React.FC = () => {
  
                   <button 
                       onClick={() => setCurrentView(AppView.USER)}
-                      className="text-sm text-gray-500 hover:text-gray-700"
+                      className="text-sm text-gray-500 hover:text-gray-700 block mx-auto mb-6"
                   >
                       Kembali ke Utama
                   </button>
+
+                  <div className="pt-6 border-t border-gray-100">
+                    <p className="text-xs text-gray-400 mb-2">Masalah Database?</p>
+                    <button 
+                        onClick={handleInitializeDb}
+                        disabled={isInitializingDb}
+                        className="text-xs bg-red-50 text-red-600 px-3 py-1.5 rounded-lg border border-red-100 hover:bg-red-100 flex items-center justify-center gap-1 mx-auto"
+                    >
+                         {isInitializingDb ? <Loader2 className="w-3 h-3 animate-spin"/> : <Database className="w-3 h-3" />}
+                         Reset / Init Database
+                    </button>
+                  </div>
               </div>
           </div>
       )
@@ -932,7 +968,7 @@ const App: React.FC = () => {
                 )}
                 
                 {/* ADMIN ICON (No Settings anymore) */}
-                <div className="w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center">
+                <div className="w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center cursor-pointer" onClick={() => setCurrentView(AppView.ADMIN_LOGIN)}>
                     <User className="w-5 h-5" />
                 </div>
             </div>
