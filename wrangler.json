@@ -13,6 +13,11 @@
       "database_id": "ee1edaae-f2b6-4538-9f1f-b16ef21faf46"
     }
   ],
+  "vars": {
+    "ADMIN_PIN": "123456",
+    "TOYYIB_SECRET_KEY": "gantikan-dengan-secret-key-anda",
+    "TOYYIB_CATEGORY_CODE": "gantikan-dengan-category-code"
+  },
   "observability": {
     "enabled": true
   }

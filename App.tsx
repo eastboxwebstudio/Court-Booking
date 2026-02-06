@@ -30,7 +30,8 @@ import {
   List,
   LogOut,
   Edit2,
-  Database
+  Database,
+  Hammer
 } from 'lucide-react';
 
 const START_HOUR = 8; // 8 AM
@@ -64,6 +65,7 @@ const App: React.FC = () => {
   const [step, setStep] = useState<BookingStep>(BookingStep.SELECT_COURT);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [isOfflineMode, setIsOfflineMode] = useState(false);
+  const [dbError, setDbError] = useState(false); // New state to track critical DB errors
   
   // Payment Processing State
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
@@ -163,9 +165,15 @@ const App: React.FC = () => {
   // --- API Fetching (Cloudflare Worker) ---
   const fetchCourts = async () => {
     setLoading(true);
+    setDbError(false);
     try {
       const res = await fetch('/api/courts');
-      if (!res.ok) throw new Error("Network response was not ok");
+      
+      if (!res.ok) {
+          // If 500 error, it likely means DB table doesn't exist
+          setDbError(true);
+          throw new Error("Database Error or Table Missing");
+      }
       
       const data = await res.json();
       
@@ -178,14 +186,15 @@ const App: React.FC = () => {
           setCourts(cleanData);
           setIsOfflineMode(false);
       } else {
-          // Jika DB kosong, guna Mock
+          // Jika array kosong tapi status OK, mungkin table wujud tapi tiada data
+          if (data.length === 0) setDbError(true); // Treat empty DB as needing init
           setCourts(MOCK_COURTS);
       }
     } catch (e) {
       console.warn("Using Offline Data (Courts):", e);
       setCourts(MOCK_COURTS);
       setIsOfflineMode(true);
-      if (currentView === AppView.USER) showToast("Mod Offline (Gagal sambung ke database).", "warning");
+      // Don't show toast on initial load to avoid annoyance, just show UI indicator
     } finally {
       setLoading(false);
     }
@@ -323,18 +332,19 @@ const App: React.FC = () => {
 
   // --- DATABASE INITIALIZATION (FIX) ---
   const handleInitializeDb = async () => {
-      if (!confirm("AMARAN: Ini akan memadam semua data lama dan reset database. Teruskan?")) return;
+      if (!confirm("Adakah anda pasti? Ini akan membina semula database.")) return;
       
       setIsInitializingDb(true);
       try {
           const res = await fetch('/api/init', { method: 'POST' });
           const data = await res.json();
           if (res.ok) {
-              showToast("Database berjaya di-reset!", "success");
+              showToast("Database berjaya dibina!", "success");
+              setDbError(false);
               // Reload courts to verify
               fetchCourts();
           } else {
-              showToast("Gagal reset DB: " + data.message, "error");
+              showToast("Gagal: " + data.message, "error");
           }
       } catch (e: any) {
           showToast("Ralat Network: " + e.message, "error");
@@ -668,7 +678,7 @@ const App: React.FC = () => {
                       value={adminPin}
                       onChange={(e) => setAdminPin(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleAdminLogin()}
-                      placeholder="Masukkan PIN"
+                      placeholder="Masukkan PIN (Default: 123456)"
                       className="w-full text-center text-2xl tracking-widest p-3 bg-gray-100 rounded-xl border border-gray-300 mb-6 focus:ring-2 focus:ring-emerald-500 outline-none"
                       maxLength={6}
                   />
@@ -1008,6 +1018,23 @@ const App: React.FC = () => {
                 </div>
                 <span className="font-mono font-bold text-lg">{formatTimeLeft(timeLeft)}</span>
              </div>
+        )}
+
+        {/* --- CRITICAL: DB INIT BUTTON ON MAIN SCREEN IF ERROR --- */}
+        {dbError && step === BookingStep.SELECT_COURT && (
+            <div className="mb-6 bg-red-50 border border-red-200 p-4 rounded-xl flex flex-col items-center text-center animate-bounce-slow">
+                <Database className="w-8 h-8 text-red-500 mb-2" />
+                <h3 className="font-bold text-red-800">Database Belum Siap!</h3>
+                <p className="text-xs text-red-600 mb-3">Table tidak dijumpai. Sila tekan butang di bawah untuk setup.</p>
+                <button 
+                    onClick={handleInitializeDb}
+                    disabled={isInitializingDb}
+                    className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-red-700"
+                >
+                    {isInitializingDb ? <Loader2 className="w-4 h-4 animate-spin"/> : <Hammer className="w-4 h-4" />}
+                    Setup Database Sekarang
+                </button>
+            </div>
         )}
         
         {/* Step 1: Court Selection */}
