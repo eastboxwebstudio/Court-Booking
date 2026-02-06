@@ -1,5 +1,5 @@
 {
-  "name": "courtmas",
+  "name": "badmintoncourtbooking",
   "main": "worker.ts",
   "compatibility_date": "2024-02-08",
   "assets": {
@@ -12,5 +12,8 @@
       "database_name": "courtmas-db",
       "database_id": "ee1edaae-f2b6-4538-9f1f-b16ef21faf46"
     }
-  ]
+  ],
+  "observability": {
+    "enabled": true
+  }
 }
