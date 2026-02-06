@@ -46,7 +46,7 @@ export default {
                     DROP TABLE IF EXISTS courts;
 
                     CREATE TABLE courts (
-                      id INTEGER PRIMARY KEY,
+                      id INTEGER PRIMARY KEY, -- Auto Increment implied in SQLite
                       name TEXT NOT NULL,
                       type TEXT NOT NULL,
                       sport TEXT NOT NULL,
@@ -69,14 +69,14 @@ export default {
                       FOREIGN KEY (courtId) REFERENCES courts(id)
                     );
 
-                    INSERT INTO courts (id, name, type, sport, pricePerHour) VALUES 
-                    (1, "Court Dato' Lee", 'Rubber', 'Badminton', 20),
-                    (2, "Court Misbun", 'Rubber', 'Badminton', 20),
-                    (3, "Court Sidek", 'Parquet', 'Badminton', 15),
-                    (4, "Arena Harimau", 'FIFA Turf', 'Futsal', 80),
-                    (5, "Arena Bunga Raya", 'Vinyl', 'Futsal', 70),
-                    (6, "Pickle Pro A", 'Hard Court', 'Pickleball', 25),
-                    (7, "Pickle Pro B", 'Hard Court', 'Pickleball', 25);
+                    INSERT INTO courts (name, type, sport, pricePerHour) VALUES 
+                    ("Court Dato' Lee", 'Rubber', 'Badminton', 20),
+                    ("Court Misbun", 'Rubber', 'Badminton', 20),
+                    ("Court Sidek", 'Parquet', 'Badminton', 15),
+                    ("Arena Harimau", 'FIFA Turf', 'Futsal', 80),
+                    ("Arena Bunga Raya", 'Vinyl', 'Futsal', 70),
+                    ("Pickle Pro A", 'Hard Court', 'Pickleball', 25),
+                    ("Pickle Pro B", 'Hard Court', 'Pickleball', 25);
                 `);
                 return Response.json({ status: 'success', message: 'Database berjaya di-reset dan di-isi data!' });
             } catch (e: any) {
@@ -206,6 +206,27 @@ export default {
 
            await env.DB.prepare(query).bind(...params).run();
            return Response.json({ status: 'success' });
+        }
+
+        // 8. ADMIN: ADD NEW COURT
+        if (path === '/api/admin/courts' && request.method === 'POST') {
+           const body: any = await request.json();
+           const { name, type, sport, pricePerHour } = body;
+
+           // Validation
+           if (!name || !type || !sport || !pricePerHour) {
+             return Response.json({ status: 'error', message: 'Missing fields' }, { status: 400 });
+           }
+
+           const res = await env.DB.prepare(
+             'INSERT INTO courts (name, type, sport, pricePerHour, isAvailable) VALUES (?, ?, ?, ?, 1)'
+           ).bind(name, type, sport, pricePerHour).run();
+
+           if(res.success) {
+             return Response.json({ status: 'success' });
+           } else {
+             return Response.json({ status: 'error', message: 'DB Error' }, { status: 500 });
+           }
         }
 
         return new Response('Not Found', { status: 404 });

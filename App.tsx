@@ -31,7 +31,9 @@ import {
   LogOut,
   Edit2,
   Database,
-  Hammer
+  Hammer,
+  Plus,
+  Save
 } from 'lucide-react';
 
 const START_HOUR = 8; // 8 AM
@@ -61,6 +63,15 @@ const App: React.FC = () => {
   const [adminPin, setAdminPin] = useState("");
   const [isVerifyingPin, setIsVerifyingPin] = useState(false); 
   const [isInitializingDb, setIsInitializingDb] = useState(false);
+
+  // Admin Add Court State
+  const [isAddingCourt, setIsAddingCourt] = useState(false);
+  const [newCourtData, setNewCourtData] = useState({
+      name: '',
+      type: '',
+      sport: 'Badminton',
+      pricePerHour: 20
+  });
 
   const [step, setStep] = useState<BookingStep>(BookingStep.SELECT_COURT);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
@@ -274,6 +285,36 @@ const App: React.FC = () => {
       } catch(e) {
           showToast("Gagal kemaskini server", "error");
           fetchCourts(); // Revert
+      }
+  };
+
+  const handleAddCourt = async () => {
+      if(!newCourtData.name || !newCourtData.type) {
+          showToast("Sila isi semua maklumat", "warning");
+          return;
+      }
+      
+      setLoading(true);
+      try {
+          const res = await fetch('/api/admin/courts', {
+              method: 'POST',
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(newCourtData)
+          });
+          
+          if(res.ok) {
+              showToast("Gelanggang berjaya ditambah", "success");
+              setIsAddingCourt(false);
+              setNewCourtData({ name: '', type: '', sport: 'Badminton', pricePerHour: 20 });
+              fetchCourts(); // Reload list
+          } else {
+              const data = await res.json();
+              showToast(data.message || "Ralat server", "error");
+          }
+      } catch(e) {
+          showToast("Ralat rangkaian", "error");
+      } finally {
+          setLoading(false);
       }
   };
 
@@ -718,7 +759,72 @@ const App: React.FC = () => {
   // 2. Admin Dashboard View
   if (currentView === AppView.ADMIN_DASHBOARD) {
       return (
-          <div className="min-h-screen bg-gray-100 pb-20">
+          <div className="min-h-screen bg-gray-100 pb-20 relative">
+              {/* Add Court Modal */}
+              {isAddingCourt && (
+                  <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
+                      <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+                          <div className="flex justify-between items-center mb-4">
+                              <h3 className="font-bold text-lg">Tambah Gelanggang</h3>
+                              <button onClick={() => setIsAddingCourt(false)}><X className="w-5 h-5 text-gray-400" /></button>
+                          </div>
+                          <div className="space-y-4">
+                              <div>
+                                  <label className="text-xs text-gray-500 font-bold block mb-1">Nama Court</label>
+                                  <input 
+                                    type="text" 
+                                    className="w-full border rounded-lg p-2 text-sm"
+                                    placeholder="Contoh: Arena Jaguh 1"
+                                    value={newCourtData.name}
+                                    onChange={e => setNewCourtData({...newCourtData, name: e.target.value})}
+                                  />
+                              </div>
+                              <div className="flex gap-2">
+                                  <div className="flex-1">
+                                      <label className="text-xs text-gray-500 font-bold block mb-1">Sukan</label>
+                                      <select 
+                                        className="w-full border rounded-lg p-2 text-sm"
+                                        value={newCourtData.sport}
+                                        onChange={e => setNewCourtData({...newCourtData, sport: e.target.value as any})}
+                                      >
+                                          <option value="Badminton">Badminton</option>
+                                          <option value="Futsal">Futsal</option>
+                                          <option value="Pickleball">Pickleball</option>
+                                      </select>
+                                  </div>
+                                  <div className="flex-1">
+                                      <label className="text-xs text-gray-500 font-bold block mb-1">Jenis Lantai</label>
+                                      <input 
+                                        type="text" 
+                                        className="w-full border rounded-lg p-2 text-sm"
+                                        placeholder="Contoh: Rubber"
+                                        value={newCourtData.type}
+                                        onChange={e => setNewCourtData({...newCourtData, type: e.target.value})}
+                                      />
+                                  </div>
+                              </div>
+                              <div>
+                                  <label className="text-xs text-gray-500 font-bold block mb-1">Harga (RM/Jam)</label>
+                                  <input 
+                                    type="number" 
+                                    className="w-full border rounded-lg p-2 text-sm"
+                                    value={newCourtData.pricePerHour}
+                                    onChange={e => setNewCourtData({...newCourtData, pricePerHour: Number(e.target.value)})}
+                                  />
+                              </div>
+                              <button 
+                                onClick={handleAddCourt}
+                                disabled={loading}
+                                className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 mt-4 hover:bg-emerald-700"
+                              >
+                                  {loading ? <Loader2 className="w-4 h-4 animate-spin"/> : <Save className="w-4 h-4"/>}
+                                  Simpan
+                              </button>
+                          </div>
+                      </div>
+                  </div>
+              )}
+
               {/* Admin Header */}
               <div className="bg-gray-900 text-white p-6 rounded-b-[2rem] shadow-lg mb-6">
                   <div className="flex justify-between items-center mb-6">
@@ -812,6 +918,16 @@ const App: React.FC = () => {
               {/* Tab 2: Content (Courts) */}
               {adminActiveTab === 'content' && (
                   <div className="px-4 space-y-4">
+                      
+                      {/* Add Court Button */}
+                      <button 
+                        onClick={() => setIsAddingCourt(true)}
+                        className="w-full bg-emerald-100 text-emerald-700 py-3 rounded-xl font-bold border border-emerald-200 flex items-center justify-center gap-2 hover:bg-emerald-200 transition"
+                      >
+                          <Plus className="w-5 h-5" />
+                          Tambah Gelanggang
+                      </button>
+
                       {courts.map(court => (
                           <div key={court.id} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
                               <div>
